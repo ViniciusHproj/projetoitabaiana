@@ -143,7 +143,7 @@ def logout_view(request):
         else:
             messages.info(request, "👋 Deslogando do sistema... Até logo!")
         auth_logout(request)
-    return redirect('inicio') # Ou 'login', dependendo de onde você quer que ele caia
+    return redirect('login')
 
 def staff_required(view_func):
     @wraps(view_func)
