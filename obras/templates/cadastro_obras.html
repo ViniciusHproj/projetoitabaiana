@@ -1,0 +1,186 @@
+<div id="conteudo-dinamico">
+  {% include 'partial_messages.html' %}
+
+  <div class="wrap">
+    <div class="header">
+      <div class="header-icon">
+        <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+          <rect x="2" y="10" width="14" height="6" rx="1" fill="#854F0B" />
+          <rect x="5" y="5" width="8" height="6" rx="1" fill="#854F0B" opacity=".6" />
+          <rect x="8" y="2" width="2" height="4" rx="1" fill="#854F0B" opacity=".4" />
+        </svg>
+      </div>
+      <div>
+        <div class="header-title">Cadastro de Obras</div>
+        <div class="header-sub">Preencha os dados da obra a registrar</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <form hx-post="{% url 'Cadastro-Obras' %}" 
+            hx-target="#conteudo-dinamico" 
+            hx-encoding="multipart/form-data"
+            hx-indicator="#btn-salvar">
+        {% csrf_token %}
+
+        <div class="form-grid">
+          
+          <div class="field">
+            <label>ID da Obra (Opcional)</label>
+            <input value="{{ dados.ID_OBRA_MANUAL|default:'' }}" 
+              type="text" id="idObraManual" name="ID_OBRA_MANUAL"
+              placeholder="Ex: 12026"
+            />
+            <small style="font-size: 11px; color: #666; margin-top: 4px; display: block; line-height: 1.2;">
+              (Se a obra não está no banco mas já existe, digite o id manualmente, caso contrário, será gerado automaticamente)
+            </small>
+          </div>
+
+          <div class="field">
+            <label>Tipo de Obra</label>
+            <input value="{{ dados.TIPO_OBRA|default:'' }}" 
+              type="text" id="tipoObra" name="TIPO_OBRA"
+              placeholder="Ex: PAVIMENTAÇÃO PARALEPÍPEDO"
+              style="text-transform: uppercase"
+            />
+          </div>
+
+          <div class="field">
+            <label>Situação</label>
+            <select id="situacao" name="SITUACAO" >
+              <option value="">Selecione...</option>
+              <option value="Finalizada por conclusão de construção" {% if dados.SITUACAO == "Finalizada por conclusão de construção" %}selected{% endif %}>Finalizada por conclusão de construção</option>
+              <option value="Finalizada por distrato" {% if dados.SITUACAO == "Finalizada por distrato" %}selected{% endif %}>Finalizada por distrato</option>
+              <option value="Em andamento" {% if dados.SITUACAO == "Em andamento" %}selected{% endif %}>Em andamento</option>
+              <option value="Paralisada" {% if dados.SITUACAO == "Paralisada" %}selected{% endif %}>Paralisada</option>
+              <option value="Cancelada" {% if dados.SITUACAO == "Cancelada" %}selected{% endif %}>Cancelada</option>
+              <option value="Em licitação" {% if dados.SITUACAO == "Em licitação" %}selected{% endif %}>Em licitação</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label>Valor Total da Obra</label>
+            <div class="valor-wrap">
+              <span class="valor-prefix">R$</span>
+              <input  type="text" id="valorObra" name="VALOR_OBRA" class="valor-input"
+                value="{{ dados.VALOR_OBRA|default:'' }}" placeholder="0,00" inputmode="numeric" />
+            </div>
+          </div>
+
+          <div class="field">
+            <label>Data de Início</label>
+            <input type="date" id="dataInicio" name="DATA_INICIO" value="{{ dados.DATA_INICIO|default:'' }}" />
+          </div>
+
+          <div class="field">
+            <label>Conclusão Prevista</label>
+            <input type="date" id="conclusaoPrevista" name="CONCLUSAO_PREVISTA" value="{{ dados.CONCLUSAO_PREVISTA|default:'' }}" />
+          </div>
+
+          <div class="field">
+            <label>Data de Finalização</label>
+            <input type="date" id="dataFinalizacao" name="DATA_FINALIZACAO" value="{{ dados.DATA_FINALIZACAO|default:'' }}"  />
+          </div>
+
+          <div class="field">
+            <label>Tipo de Execução</label>
+            <select id="tipoExecucao" name="TIPO_EXECUCAO" >
+              <option value="">Selecione...</option>
+              <option value="Nova Construção" {% if dados.TIPO_EXECUCAO == "Nova Construção" %}selected{% endif %}>Nova Construção</option>
+              <option value="Reforma" {% if dados.TIPO_EXECUCAO == "Reforma" %}selected{% endif %}>Reforma</option>
+              <option value="Ampliação" {% if dados.TIPO_EXECUCAO == "Ampliação" %}selected{% endif %}>Ampliação</option>
+              <option value="Manutenção" {% if dados.TIPO_EXECUCAO == "Manutenção" %}selected{% endif %}>Manutenção</option>
+              <option value="Restauração" {% if dados.TIPO_EXECUCAO == "Restauração" %}selected{% endif %}>Restauração</option>
+            </select>
+          </div>
+
+          <div class="field full">
+            <label>Nome da Empresa</label>
+            <input value="{{ dados.NOME_EMPRESA|default:'' }}" 
+              type="text" name="NOME_EMPRESA" id="nomeEmpresa"
+              placeholder="Digite o nome da empresa contratada"
+              style="text-transform: uppercase"
+            />
+          </div>
+
+          <div class="field full">
+            <label>CNPJ da Empresa</label>
+            <input value="{{ dados.CNPJ_EMPRESA|default:'' }}" 
+                   type="text" name="CNPJ_EMPRESA" id="cnpj_empresa" 
+                   placeholder="00.000.000/0001-00" 
+                   maxlength="18" oninput="mascaraCNPJ(this)">
+          </div>
+
+          <div class="field full">
+            <label>Endereço</label>
+            <input type="text" id="endereco" name="ENDERECO"
+              value="{{ dados.ENDERECO|default:'' }}"
+              placeholder="Ex: TRAVESSA DO JUCURI E HOMERO F. DE ALMEIDA"
+              style="text-transform: uppercase"
+            />
+          </div>
+
+          <div class="field full">
+            <label>Foto da Obra, adicione uma ou mais</label>
+            <input type="file" id="fotoObra" name="FOTO_OBRA" accept="image/*" multiple style="width: 100%; padding: 8px; background: #f9f9f9; border: 1px dashed #ccc; border-radius: 4px;">
+            <small style="color: #666; font-size: 11px;">As fotos selecionadas serão adicionadas à galeria da obra.</small>
+          </div>
+        </div>
+
+        <div class="btn-row">
+          <button type="button" class="btn-ghost" onclick="limparForm()">Limpar</button>
+          <button type="submit" id="btn-salvar" name="btn-salvar" class="seu-css-do-botao" style="padding: 12px 24px !important; 
+                   background-color: #007bff !important; 
+                   color: white !important; 
+                   border: none !important; 
+                   border-radius: 6px !important; 
+                   cursor: pointer !important; 
+                   font-weight: 600 !important; 
+                   font-size: 16px !important;
+                   display: inline-flex !important; 
+                   align-items: center !important; 
+                   justify-content: center !important; 
+                   gap: 10px !important;
+                   transition: background-color 0.2s;">
+            <span class="texto-botao">Salvar Obra</span>
+            <div class="spinner-loading"></div>
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script>
+  /* ── Limpar formulário corrigido ── */
+  function limparForm() {
+    // Adicionado o 'idObraManual' e os outros IDs que faltavam no reset
+    const campos = ['idObraManual','tipoObra','situacao','tipoExecucao','valorObra','dataInicio','conclusaoPrevista','dataFinalizacao','nomeEmpresa','endereco','cnpj_empresa', 'fotoObra'];
+    campos.forEach(id => { 
+        const el = document.getElementById(id);
+        if(el) el.value = ''; 
+    });
+  }
+
+  /* ── Máscara CNPJ ── */
+  function mascaraCNPJ(campo) {
+    let v = campo.value.replace(/\D/g, "");
+    if (v.length > 14) v = v.slice(0, 14);
+    v = v.replace(/^(\d{2})(\d)/, "$1.$2");
+    v = v.replace(/^(\d{2})\.(\d{3})(\d)/, "$1.$2.$3");
+    v = v.replace(/\.(\d{3})(\d)/, ".$1/$2");
+    v = v.replace(/(\d{4})(\d)/, "$1-$2");
+    campo.value = v;
+  }
+
+  /* ── Máscara de Valor R$ ── */
+  document.getElementById('valorObra').addEventListener('input', function () {
+    let v = this.value.replace(/\D/g, '');
+    if (!v) { this.value = ''; return; }
+    const n = parseInt(v) / 100;
+    this.value = n.toLocaleString('pt-BR', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    });
+  });
+</script>

@@ -1,0 +1,61 @@
+{% extends 'base.html' %}
+
+{% block content %}
+{% include 'partial_messages.html' %}
+
+<div style="display: flex; justify-content: center; align-items: flex-start; min-height: 100vh; padding-top: 80px; ">
+    <div style="background: white; padding: 40px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); width: 100%; max-width: 400px; text-align: center; border-top: 6px solid #007bff;">
+        
+        <h2 style="color: #333; margin-bottom: 25px; font-weight: 700;">Login Administrativo</h2>
+
+        {% if request.GET.next %}
+            <div style="background-color: #fff3cd; color: #856404; padding: 15px; border-radius: 8px; font-size: 0.9em; margin-bottom: 25px; border: 1px solid #ffeeba; text-align: center; line-height: 1.5;">
+                <span style="font-size: 1.5em;">🔐</span><br>
+                {% if "cadastro-funcionario" in request.GET.next %}
+                    Realize o login para acessar o <strong>Cadastro de Funcionários</strong>.
+                {% elif "atualizar-funcionario" in request.GET.next %}
+                    Realize o login para <strong>Editar Funcionários</strong>.
+                {% elif "obra" in request.GET.next %}
+                    Realize o login para acessar a área de <strong>Obras</strong>.
+                {% else %}
+                    Sessão expirada ou acesso restrito. Por favor, faça login novamente.
+                {% endif %}
+            </div>
+        {% else %}
+            <div style="background: #f8f9fa; color: #495057; padding: 15px; border-radius: 8px; font-size: 0.85em; margin-bottom: 25px; border: 1px solid #e9ecef; text-align: left; border-left: 4px solid #adb5bd;">
+                <strong>Atenção:</strong> Esta área é restrita para funcionários autorizados. Cidadãos podem acompanhar as obras pelo 
+                <a href="{% url 'inicio' %}" 
+                   style="color: #007bff; font-weight: bold; text-decoration: none; border-bottom: 1px solid #007bff;">
+                   Dashboard público
+                </a>.
+            </div>
+        {% endif %}
+
+        <form method="post" action="{{ request.get_full_path }}">
+            {% csrf_token %}
+            
+            <div style="text-align: left; margin-bottom: 15px;">
+                <label for="id_username" style="display: block; margin-bottom: 8px; font-weight: 600; color: #555;">Usuário ou CPF:</label>
+                <input type="text" name="username" id="id_username" required 
+                       placeholder="Digite seu CPF"
+                       style="width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 6px; box-sizing: border-box; font-size: 16px; outline-color: #007bff;">
+            </div>
+
+            <div style="text-align: left; margin-bottom: 25px;">
+                <label for="id_password" style="display: block; margin-bottom: 8px; font-weight: 600; color: #555;">Senha:</label>
+                <input type="password" name="password" id="id_password" required 
+                       placeholder="••••••••"
+                       style="width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 6px; box-sizing: border-box; font-size: 16px; outline-color: #007bff;">
+            </div>
+
+            <button type="submit" style="width: 100%; padding: 14px; background: #007bff; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 16px; transition: 0.3s; box-shadow: 0 4px 6px rgba(0,123,255,0.2);">
+                Entrar no Sistema
+            </button>
+        </form>
+
+        <a href="{% url 'inicio' %}" style="display: block; margin-top: 25px; color: #6c757d; text-decoration: none; font-size: 0.9em;">
+            ← Voltar para o Início
+        </a>
+    </div>
+</div>
+{% endblock %}

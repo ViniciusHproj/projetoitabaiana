@@ -1,0 +1,297 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Painel De Gestão de Obras</title>
+  <link rel="icon" href="{% static 'logo.jpeg' %}" type="image/png">
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="{% static 'style_menu.css' %}" />
+  <link rel="stylesheet" href="{% static 'style_obrascadastro.css' %}" />
+  <script src="{% static 'script_menu.js' %}"></script>
+  <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+  {% block extra_css %}{% endblock %}
+
+  <style>
+    /* GARANTIA DE ESPAÇAMENTO */
+    .page-content {
+      padding-top: 90px;
+      min-height: 100vh;
+      display: block;
+      width: 100%;
+    }
+    
+    .dropdown-menu {
+      z-index: 9999;
+      display: none;
+      position: absolute;
+    }
+
+    .dropdown-menu.show-menu {
+      display: block !important;
+    }
+    
+    .nav-link {
+        cursor: pointer;
+    }
+
+    .nav-inner {
+        position: relative;
+    }
+
+    /* ========================================== */
+    /* ESTILOS DO MENU HAMBÚRGUER (BRANCO + ANIMAÇÃO) */
+    /* ========================================== */
+    .menu-hamburger-btn {
+        display: none; 
+        background: none;
+        border: none;
+        cursor: pointer;
+        color: white !important; /* Cor Branca */
+        padding: 5px 15px;
+        align-items: center;
+        gap: 10px;
+        font-family: 'Nunito', sans-serif;
+        font-weight: 600;
+    }
+
+    .hamburger-icon {
+        width: 20px;
+        height: 14px;
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+    }
+
+    .hamburger-icon span {
+        display: block;
+        height: 2px;
+        width: 100%;
+        background-color: white;
+        border-radius: 2px;
+        transition: all 0.3s ease-in-out;
+    }
+
+    /* Transformação para o X */
+    .menu-aberto-anima span:nth-child(1) {
+        transform: translateY(6px) rotate(45deg);
+    }
+    .menu-aberto-anima span:nth-child(2) {
+        opacity: 0;
+    }
+    .menu-aberto-anima span:nth-child(3) {
+        transform: translateY(-6px) rotate(-45deg);
+    }
+
+    /* Em telas pequenas o menu vira hambúrguer; em desktop continua horizontal normalmente */
+    @media (max-width: 768px) {
+        .menu-hamburger-btn {
+            display: flex;
+            margin-left: auto;
+        }
+
+        .nav-links {
+            display: none !important;
+            flex-direction: column;
+            position: absolute;
+            top: 100%;
+            right: 0;
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+            padding: 10px;
+            min-width: 200px;
+            z-index: 9999;
+        }
+
+        .nav-links.menu-aberto {
+            display: flex !important;
+        }
+
+        .nav-links.menu-aberto .nav-link,
+        .nav-links.menu-aberto button {
+            color: #333 !important;
+            text-align: left;
+            width: 100%;
+            padding: 10px 15px;
+        }
+
+        .dropdown-menu {
+            position: static;
+            box-shadow: none;
+            border: none;
+            padding-left: 20px;
+            background: transparent;
+        }
+    }
+  </style>
+</head>
+
+<body>
+
+  <nav style="position: fixed; top: 0; width: 100%; z-index: 1000;">
+    <div class="nav-inner">
+      <a href="{% url 'inicio' %}" class="nav-logo">
+        <div class="nav-logo-icon">
+          <img src="{% static 'logo.jpeg' %}" alt="Logo" style="width: 24px; height: 24px; object-fit: contain;">
+        </div>
+        <span class="nav-logo-text">Gestão de Obras</span>
+      </a>
+      
+      <button class="menu-hamburger-btn" onclick="toggleMenuPrincipal()">
+        <div class="hamburger-icon" id="icon-referencia">
+            <span></span>
+            <span></span>
+            <span></span>
+        </div>
+        <span>Menu</span>
+      </button>
+
+      <ul class="nav-links" id="lista-nav-links">
+        <li>
+          <a href="{% url 'inicio' %}" class="nav-link active" id="link-inicio">Início</a>
+        </li>
+
+        {% if user.is_authenticated %}
+        
+        <li>
+          <button class="nav-link dropdown-toggle" onclick="toggleDropdown(this)">
+            Cadastro
+            <svg class="chevron" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+          </button>
+
+          <div class="dropdown-menu">
+            {% if user.is_staff or user.is_superuser %}
+            <a hx-get="{% url 'cadastro_funcionario' %}" hx-target="#conteudo-dinamico" hx-swap="innerHTML" hx-push-url="true" class="dropdown-item" onclick="closeAllMenus()">Cadastro de Funcionário</a>
+            {% endif %}
+            <a hx-get="{% url 'Cadastro-Obras' %}" hx-target="#conteudo-dinamico" hx-swap="innerHTML" hx-push-url="true" class="dropdown-item" onclick="closeAllMenus()">Cadastro de Obras</a>
+          </div> 
+        </li>
+          
+        <li>
+          <button class="nav-link dropdown-toggle" onclick="toggleDropdown(this)">
+            Atualização
+            <svg class="chevron" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+          </button>
+
+          <div class="dropdown-menu">
+            {% if user.is_staff or user.is_superuser %}
+            <a hx-get="{% url 'busca_atualiza_funcionario' %}" hx-target="#conteudo-dinamico" hx-swap="innerHTML" hx-push-url="true" class="dropdown-item" onclick="closeAllMenus()">Atualização de Funcionário</a>
+            {% endif %}
+            <a hx-get="{% url 'busca_atualiza_obra' %}" hx-target="#conteudo-dinamico" hx-swap="innerHTML" hx-push-url="true" class="dropdown-item" onclick="closeAllMenus()">Atualização de Obras</a>
+          </div>
+        </li>
+
+        <li>
+          <form action="{% url 'logout' %}" method="post" style="display: inline; width: 100%;">
+              {% csrf_token %}
+              <button type="submit" class="nav-link" style="background: none; border: none; cursor: pointer; color: #d9534f !important; font-weight: bold;">Sair</button>
+          </form>
+        </li>
+
+        {% else %}
+        <li>
+            <a hx-get="{% url 'login' %}" hx-target="#conteudo-dinamico" hx-swap="innerHTML" hx-push-url="true" class="nav-link">Login</a>
+        </li>
+        {% endif %}
+      </ul>
+    </div>
+  </nav>
+
+  <main class="page-content" id="conteudo-dinamico">
+    {% block content %}{% endblock %}
+  </main>
+
+<script>
+    function toggleMenuPrincipal() {
+        const menu = document.getElementById('lista-nav-links');
+        const icon = document.getElementById('icon-referencia');
+        menu.classList.toggle('menu-aberto');
+        icon.classList.toggle('menu-aberto-anima');
+        resetarTimer();
+    }
+
+    window.closeAllMenus = function() {
+        const menu = document.getElementById('lista-nav-links');
+        const icon = document.getElementById('icon-referencia');
+        if(menu) menu.classList.remove('menu-aberto');
+        if(icon) icon.classList.remove('menu-aberto-anima');
+        closeDropdowns();
+    };
+
+    const usuarioEstaLogado = "{{ user.is_authenticated|yesno:'true,false' }}" === "true";
+    const tempoLimite = 3600 * 1000; 
+    let temporizador;
+
+    function encerrarSessaoPorInatividade() {
+        if (!usuarioEstaLogado) return;
+        const urlLogout = "{% url 'logout' %}";
+        const formLogout = document.querySelector(`form[action="${urlLogout}"]`);
+        if (formLogout) { formLogout.submit(); } else { window.location.href = urlLogout; }
+    }
+
+    window.resetarTimer = function() {
+        clearTimeout(temporizador);
+        temporizador = setTimeout(encerrarSessaoPorInatividade, tempoLimite);
+    };
+
+    window.onload = resetarTimer;
+    window.onmousemove = resetarTimer;
+    window.onmousedown = resetarTimer;
+    window.onkeypress = resetarTimer;
+    window.onscroll = resetarTimer;
+    document.onclick = resetarTimer;
+
+    window.toggleDropdown = function(botaoClicado) {
+        const menuAtual = botaoClicado.parentElement.querySelector('.dropdown-menu');
+        document.querySelectorAll('.dropdown-menu').forEach(function(menu) {
+            if (menu !== menuAtual) { menu.classList.remove('show-menu'); }
+        });
+        if (menuAtual) { menuAtual.classList.toggle('show-menu'); }
+        resetarTimer();
+    };
+
+    window.closeDropdowns = function() {
+        document.querySelectorAll('.dropdown-menu').forEach(function(menu) {
+            menu.classList.remove('show-menu');
+        });
+    };
+
+    document.addEventListener('click', function(event) {
+        if (!event.target.closest('.nav-links') && !event.target.closest('.menu-hamburger-btn')) {
+            closeAllMenus();
+        }
+    });
+
+    document.body.addEventListener('htmx:afterOnLoad', function(evt) {
+        resetarTimer();
+        processarMensagens();
+    });
+
+    document.body.addEventListener('htmx:beforeSwap', function(evt) {
+        if (evt.detail.xhr.responseURL && evt.detail.xhr.responseURL.includes('/login/')) {
+            evt.preventDefault();
+            window.location.href = evt.detail.xhr.responseURL;
+        }
+    });
+
+    window.processarMensagens = function() {
+        const mensagens = Array.from(document.querySelectorAll('.alerta-animado'));
+        const textosVistos = new Set();
+        mensagens.reverse().forEach(msg => {
+            const texto = msg.innerText.trim();
+            if (textosVistos.has(texto)) {
+                msg.remove(); 
+            } else {
+                textosVistos.add(texto);
+                setTimeout(() => { if (msg) msg.remove(); }, 4500);
+            }
+        });
+    };
+    window.addEventListener('load', processarMensagens);
+</script>
+</body>
+</html>

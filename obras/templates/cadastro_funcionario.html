@@ -1,0 +1,109 @@
+<div id="conteudo-dinamico">
+    {% include 'partial_messages.html' %}
+
+    <div class="container" style="max-width: 600px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
+        
+        <h2 style="text-align: center; color: #333;">Cadastrar Novo Funcionário</h2>
+
+        <div style="display: flex; border-bottom: 2px solid #ccc; margin-bottom: 20px;">
+            <button type="button" id="btn-dados" onclick="mostrarAba('dados')" style="flex: 1; padding: 12px; background: #007bff; color: white; border: none; cursor: pointer; font-weight: bold; transition: 0.3s;">Dados Pessoais</button>
+            <button type="button" id="btn-login" onclick="mostrarAba('login')" style="flex: 1; padding: 12px; background: #e9ecef; color: #333; border: none; cursor: pointer; font-weight: bold; transition: 0.3s;">Dados de Login</button>
+        </div>
+
+        <form hx-post="{% url 'cadastro_funcionario' %}" hx-target="#conteudo-dinamico" hx-swap="innerHTML" hx-indicator="#btn-salvar">
+            {% csrf_token %}
+
+            <div id="aba-dados" style="display: block;">
+                <label style="font-weight: bold;">Nome Completo:</label>
+                <input type="text" name="NOME" value="{{ dados.NOME|default:'' }}"  style="width: 100%; margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+
+                <label style="font-weight: bold;">Data de Nascimento:</label>
+                <input type="date" name="DATA_NASCIMENTO" value="{{ dados.DATA_NASCIMENTO|default:'' }}"   style="width: 100%; margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+
+                <label style="font-weight: bold;">RG:</label>
+                <input type="text" name="RG" value="{{ dados.RG|default:'' }}"  maxlength="12" oninput="mascaraRG(this)" placeholder="00.000.000-0" style="width: 100%; margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+                
+                <div style="text-align: right;">
+                    <button type="button" onclick="mostrarAba('login')" style="padding: 10px 20px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">Próximo ➡️</button>
+                </div>
+            </div>
+
+            <div id="aba-login" style="display: none;">
+                <label style="font-weight: bold;">CPF (Login):</label>
+                <input type="text" name="CPF" value="{{ dados.CPF|default:'' }}"  maxlength="14" oninput="mascaraCPF(this)" placeholder="000.000.000-00" style="width: 100%; margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+                
+                <label style="font-weight: bold;">Função no Sistema:</label>
+                <select name="NIVEL_ACESSO"  style="width: 100%; margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; border-radius: 4px; background: white;">
+                    <option value="COMUM" {% if dados.NIVEL_ACESSO == 'COMUM' %}selected{% endif %}>FUNCIONÁRIO COMUM (Apenas cadastra obras)</option>
+                    <option value="SUPERVISOR" {% if dados.NIVEL_ACESSO == 'SUPERVISOR' %}selected{% endif %}>SUPERVISOR (Pode cadastrar outros)</option>
+                </select>
+                
+                <label style="font-weight: bold;">Senha:</label>
+                <input type="password" name="SENHA"  style="width: 100%; margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+
+                <div style="display: flex; justify-content: space-between; margin-top: 10px;">
+                    <button type="button" onclick="mostrarAba('dados')" style="padding: 10px 20px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;">⬅️ Voltar</button>
+                    <button type="submit" id="btn-salvar" name="btn-salvar" style="padding: 12px 24px !important; 
+                            background-color: #007bff !important; 
+                            color: white !important; 
+                            border: none !important; 
+                            border-radius: 6px !important; 
+                            cursor: pointer !important; 
+                            font-weight: 600 !important; 
+                            font-size: 16px !important;
+                            display: inline-flex !important; 
+                            align-items: center !important; 
+                            justify-content: center !important; 
+                            gap: 10px !important;
+                            transition: background-color 0.2s;">
+                            <span class="texto-botao">Salvar Funcionario</span>
+                            <div class="spinner-loading"></div>
+                    </button>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+    // 4. MELHORIA: Preservar a aba correta se houver erro de validação
+    {% if dados.CPF %}
+        mostrarAba('login'); 
+    {% endif %}
+
+    function mascaraCPF(input) {
+        let v = input.value.replace(/\D/g, "");
+        if (v.length > 11) v = v.slice(0, 11);
+        v = v.replace(/(\d{3})(\d)/, "$1.$2");
+        v = v.replace(/(\d{3})(\d)/, "$1.$2");
+        v = v.replace(/(\d{3})(\d{1,2})$/, "$1-$2");
+        input.value = v;
+    }
+
+    function mascaraRG(input) {
+        let v = input.value.replace(/\D/g, "");
+        v = v.replace(/(\d{2})(\d)/, "$1.$2");
+        v = v.replace(/(\d{3})(\d)/, "$1.$2");
+        v = v.replace(/(\d{3})(\d{1})$/, "$1-$2");
+        input.value = v;
+    }
+
+    function mostrarAba(aba) {
+        const btnDados = document.getElementById('btn-dados');
+        const btnLogin = document.getElementById('btn-login');
+        const divDados = document.getElementById('aba-dados');
+        const divLogin = document.getElementById('aba-login');
+
+        if (aba === 'dados') {
+            divDados.style.display = 'block';
+            divLogin.style.display = 'none';
+            btnDados.style.background = '#007bff'; btnDados.style.color = 'white';
+            btnLogin.style.background = '#e9ecef'; btnLogin.style.color = '#333';
+        } else {
+            divDados.style.display = 'none';
+            divLogin.style.display = 'block';
+            btnLogin.style.background = '#007bff'; btnLogin.style.color = 'white';
+            btnDados.style.background = '#e9ecef'; btnDados.style.color = '#333';
+        }
+    }
+</script>

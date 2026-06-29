@@ -1,0 +1,316 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+    --blue-main: #4589C8;
+    --blue-dark: #2f6aaa;
+    --blue-light: #dceeff;
+    --blue-hover: #3a78b5;
+    --white: #ffffff;
+    --text-light: #f0f6ff;
+    --shadow: 0 4px 16px rgba(45, 100, 170, 0.18);
+    --radius: 8px;
+}
+
+body {
+    font-family: 'Nunito', sans-serif;
+    background: #f3f7fb;
+    min-height: 100vh;
+}
+
+/* ── NAVBAR ── */
+nav {
+    background: var(--blue-main);
+    box-shadow: var(--shadow);
+    position: sticky;
+    top: 0;
+    z-index: 1000;
+}
+
+.nav-inner {
+    max-width: 1200px;
+    margin: 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 2rem;
+    height: 64px;
+}
+
+/* Logo */
+.nav-logo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    text-decoration: none;
+}
+
+.nav-logo-icon {
+    width: 36px;
+    height: 36px;
+    background: rgba(255,255,255,0.22);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.nav-logo-icon svg {
+    width: 20px;
+    height: 20px;
+    fill: var(--white);
+}
+
+.nav-logo-text {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--white);
+    letter-spacing: 0.3px;
+}
+
+/* Nav links */
+.nav-links {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    list-style: none;
+}
+
+.nav-links li {
+    position: relative;
+}
+
+.nav-link {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    border-radius: var(--radius);
+    color: var(--text-light);
+    text-decoration: none;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s, color 0.2s;
+    border: none;
+    background: none;
+    white-space: nowrap;
+}
+
+.nav-link:hover,
+.nav-link.active {
+    background: rgba(255,255,255,0.18);
+    color: var(--white);
+}
+
+.nav-link.active {
+    background: rgba(255,255,255,0.22);
+}
+
+/* Chevron icon */
+.chevron {
+    width: 14px;
+    height: 14px;
+    stroke: currentColor;
+    fill: none;
+    stroke-width: 2.2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    transition: transform 0.22s;
+    flex-shrink: 0;
+}
+
+.dropdown-toggle[aria-expanded="true"] .chevron {
+    transform: rotate(180deg);
+}
+
+/* Dropdown */
+.dropdown-menu {
+    display: none;
+    position: absolute;
+    top: calc(100% + 8px);
+    left: 0;
+    min-width: 220px;
+    background: var(--white);
+    border-radius: var(--radius);
+    box-shadow: 0 8px 28px rgba(45,100,170,0.18), 0 1px 4px rgba(0,0,0,0.06);
+    overflow: hidden;
+    animation: fadeDown 0.18s ease;
+}
+
+@keyframes fadeDown {
+    from { opacity: 0; transform: translateY(-6px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+.dropdown-menu.open {
+    display: block;
+}
+
+.dropdown-label {
+    padding: 10px 16px 6px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.7px;
+    text-transform: uppercase;
+    color: #8aafd4;
+}
+
+.dropdown-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 11px 16px;
+    color: #2c4a6e;
+    font-size: 14px;
+    font-weight: 600;
+    text-decoration: none;
+    transition: background 0.15s;
+    cursor: pointer;
+}
+
+.dropdown-item:hover {
+    background: var(--blue-light);
+    color: var(--blue-dark);
+}
+
+.dropdown-item-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 7px;
+    background: #e8f1fb;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.dropdown-item-icon svg {
+    width: 16px;
+    height: 16px;
+    stroke: var(--blue-main);
+    fill: none;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.dropdown-divider {
+    height: 1px;
+    background: #eaf0f8;
+    margin: 4px 0;
+}
+
+/* Nav right (user area) */
+.nav-user {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.nav-user-avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.25);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 14px;
+    color: var(--white);
+    cursor: pointer;
+    border: 2px solid rgba(255,255,255,0.3);
+}
+
+/* ── CONTENT PLACEHOLDER ── */
+.page-content {
+    max-width: 1200px;
+    margin: 48px auto;
+    padding: 0 2rem;
+}
+
+.welcome-card {
+    background: var(--white);
+    border-radius: 14px;
+    padding: 40px 48px;
+    box-shadow: 0 2px 16px rgba(69,137,200,0.10);
+    text-align: center;
+}
+
+.welcome-card h1 {
+    font-size: 28px;
+    font-weight: 700;
+    color: #1e3d5e;
+    margin-bottom: 12px;
+}
+
+.welcome-card p {
+    font-size: 16px;
+    color: #6b8aaa;
+    line-height: 1.6;
+}
+
+.welcome-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--blue-light);
+    color: var(--blue-dark);
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-size: 13px;
+    font-weight: 700;
+    margin-bottom: 20px;
+}
+/* CSS do Spinner de Carregamento */
+.spinner-loading {
+    display: none; /* Fica invisível por padrão */
+    width: 20px;
+    height: 20px;
+    border: 3px solid rgba(255, 255, 255, 0.3);
+    border-radius: 50%;
+    border-top-color: #ffffff; /* Cor da parte giratória */
+    animation: girar 1s ease-in-out infinite;
+    margin-left: 10px;
+}
+
+@keyframes girar {
+    to { transform: rotate(360deg); }
+}
+
+/* O HTMX adiciona a classe 'htmx-request' quando a requisição começa */
+/* Nós usamos isso para mostrar o spinner e mudar o visual do botão */
+
+.htmx-request .spinner-loading, 
+.htmx-request.spinner-loading {
+    display: inline-block; /* Mostra o spinner */
+}
+
+/* Opcional: Escurece um pouco o botão e desativa cliques duplos visualmente */
+.htmx-request {
+    opacity: 0.7;
+    pointer-events: none;
+}
+
+@media (max-width: 768px) {
+    .nav-inner {
+        padding: 0 1rem;
+    }
+
+    .nav-logo-text {
+        font-size: 17px;
+    }
+
+    .page-content {
+        padding: 0 1rem;
+        margin: 32px auto;
+    }
+
+    .welcome-card {
+        padding: 28px 20px;
+    }
+
+    .welcome-card h1 {
+        font-size: 22px;
+    }
+}

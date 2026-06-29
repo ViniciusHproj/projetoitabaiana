@@ -1,0 +1,139 @@
+{% load static %}
+<link rel="stylesheet" href="{% static 'style_obrascadastro.css' %}" />
+
+<div class="wrap">{% include 'partial_messages.html' %}
+  <div class="header">
+    <div class="header-icon">
+      <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+        <rect x="2" y="10" width="14" height="6" rx="1" fill="#854F0B" />
+        <rect x="5" y="5" width="8" height="6" rx="1" fill="#854F0B" opacity=".6" />
+        <rect x="8" y="2" width="2" height="4" rx="1" fill="#854F0B" opacity=".4" />
+      </svg>
+    </div>
+    <div>
+      <div class="header-title">Editar Obra</div>
+      <div class="header-sub">Altere os dados da obra registrada</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <form hx-post="{% url 'salva_edicao_obra' %}" hx-target="#conteudo-dinamico" hx-encoding="multipart/form-data" enctype="multipart/form-data" hx-indicator="#btn-salvar-alteracoes">
+      {% csrf_token %}
+      
+      <input type="hidden" name="ID_OBRA" value="{{ obra.ID_OBRA }}">
+
+      <div class="form-grid">
+        <div class="field full">
+          <label>Tipo de Obra</label>
+          <input value="{{ obra.TIPO_OBRA|default:'' }}"  type="text" name="TIPO_OBRA" style="text-transform: uppercase" />
+        </div>
+
+        <div class="field">
+          <label>Situação</label>
+          <select name="SITUACAO">
+            <option value="Finalizada por conclusão de construção" {% if obra.SITUACAO == "Finalizada por conclusão de construção" %}selected{% endif %}>Finalizada por conclusão de construção</option>
+            <option value="Finalizada por distrato" {% if obra.SITUACAO == "Finalizada por distrato" %}selected{% endif %}>Finalizada por distrato</option>
+            <option value="Em andamento" {% if obra.SITUACAO == "Em andamento" %}selected{% endif %}>Em andamento</option>
+            <option value="Paralisada" {% if obra.SITUACAO == "Paralisada" %}selected{% endif %}>Paralisada</option>
+            <option value="Cancelada" {% if obra.SITUACAO == "Cancelada" %}selected{% endif %}>Cancelada</option>
+            <option value="Em licitação" {% if obra.SITUACAO == "Em licitação" %}selected{% endif %}>Em licitação</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label>Valor Total da Obra</label>
+          <div class="valor-wrap">
+            <span class="valor-prefix">R$</span>
+            <input  type="text" id="valorObraEdit" name="VALOR_OBRA" class="valor-input" value="{{ obra.VALOR_OBRA|default:'' }}" inputmode="numeric" />
+          </div>
+        </div>
+
+        <div class="field">
+          <label>Data de Início</label>
+          <input type="date" name="DATA_INICIO" value="{{ obra.DATA_INICIO }}"  />
+        </div>
+
+        <div class="field">
+          <label>Conclusão Prevista</label>
+          <input type="date" name="CONCLUSAO_PREVISTA" value="{{ obra.CONCLUSAO_PREVISTA }}"  />
+        </div>
+
+        <div class="field">
+          <label>Data de Finalização</label>
+          <input type="date" name="DATA_FINALIZACAO" value="{{ obra.DATA_FINALIZACAO }}" />
+        </div>
+
+        <div class="field">
+          <label>Tipo de Execução</label>
+          <select name="TIPO_EXECUCAO" >
+            <option value="Nova Construção" {% if obra.TIPO_EXECUCAO == "Nova Construção" %}selected{% endif %}>Nova Construção</option>
+            <option value="Reforma" {% if obra.TIPO_EXECUCAO == "Reforma" %}selected{% endif %}>Reforma</option>
+            <option value="Ampliação" {% if obra.TIPO_EXECUCAO == "Ampliação" %}selected{% endif %}>Ampliação</option>
+            <option value="Manutenção" {% if obra.TIPO_EXECUCAO == "Manutenção" %}selected{% endif %}>Manutenção</option>
+            <option value="Restauração" {% if obra.TIPO_EXECUCAO == "Restauração" %}selected{% endif %}>Restauração</option>
+          </select>
+        </div>
+
+        <div class="field full">
+          <label>Nome da Empresa</label>
+          <input value="{{ obra.NOME_EMPRESA|default:'' }}"  type="text" name="NOME_EMPRESA" style="text-transform: uppercase" />
+        </div>
+
+        <div class="field full">
+          <label>Cnpj da Empresa</label>
+          <input value="{{ obra.CNPJ_EMPRESA|default:'' }}" type="text" name="CNPJ_EMPRESA" id="cnpj_edit" maxlength="18" oninput="mascaraCNPJ(this)">
+        </div>
+
+        <div class="field full">
+          <label>Endereço</label>
+          <input  type="text" name="ENDERECO" value="{{ obra.ENDERECO|default:'' }}" style="text-transform: uppercase" />
+        </div>
+
+        <div class="field full">
+          <label>Adicionar Novas Fotos</label>
+          <input type="file" id="fotoObra" name="FOTO_OBRA" accept="image/*" multiple style="width: 100%; padding: 8px; background: #f9f9f9; border: 1px dashed #ccc; border-radius: 4px;">
+          <small style="color: #666; font-size: 11px;">As fotos selecionadas serão adicionadas à galeria existente da obra.</small>
+      </div>
+      </div>
+
+      <div class="btn-row">
+        <button type="button" class="btn-ghost" onclick="window.location.reload()">Cancelar</button>
+        <button type="submit" id="btn-salvar-alteracoes" name="btn-salvar"  style="padding: 12px 24px !important; 
+                   background-color: #007bff !important; 
+                   color: white !important; 
+                   border: none !important; 
+                   border-radius: 6px !important; 
+                   cursor: pointer !important; 
+                   font-weight: 600 !important; 
+                   font-size: 16px !important;
+                   display: inline-flex !important; 
+                   align-items: center !important; 
+                   justify-content: center !important; 
+                   gap: 10px !important;
+                   transition: background-color 0.2s;">
+                <span class="texto-botao">Salvar Alterações</span>
+                <div class="spinner-loading"></div>
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+  // Máscara de Valor igual ao cadastro
+  document.getElementById('valorObraEdit').addEventListener('input', function () {
+    let v = this.value.replace(/\D/g, '');
+    if (!v) { this.value = ''; return; }
+    const n = parseInt(v) / 100;
+    this.value = n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  });
+
+  function mascaraCNPJ(campo) {
+    let v = campo.value.replace(/\D/g, "");
+    v = v.replace(/^(\d{2})(\d)/, "$1.$2");
+    v = v.replace(/^(\d{2})\.(\d{3})(\d)/, "$1.$2.$3");
+    v = v.replace(/\.(\d{3})(\d)/, ".$1/$2");
+    v = v.replace(/(\d{4})(\d)/, "$1-$2");
+    campo.value = v;
+  }
+</script>
