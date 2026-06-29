@@ -52,12 +52,18 @@
         <div class="cartao-obra">
             
             {% if obra.URL_FOTO %}
-                <img src="{{ obra.URL_FOTO }}" alt="Foto da Obra" 
-                     hx-get="{% url 'galeria_obra' obra.ID_OBRA %}" 
-                     hx-target="#container-modal-galeria"
-                     style="width: 100%; height: 200px; object-fit: cover; border-radius: 6px; margin-bottom: 4px; cursor: pointer; transition: opacity 0.2s;"
-                     onmouseover="this.style.opacity=0.8" onmouseout="this.style.opacity=1"
-                     title="Clique para ver a galeria completa">
+                <div style="position: relative;">
+                    <img src="{{ obra.URL_FOTO }}" alt="Foto da Obra"
+                         hx-get="{% url 'galeria_obra' obra.ID_OBRA %}"
+                         hx-target="#container-modal-galeria"
+                         hx-indicator="#spinner-galeria-{{ obra.ID_OBRA }}"
+                         style="width: 100%; height: 200px; object-fit: cover; border-radius: 6px; margin-bottom: 4px; cursor: pointer; transition: opacity 0.2s;"
+                         onmouseover="this.style.opacity=0.8" onmouseout="this.style.opacity=1"
+                         title="Clique para ver a galeria completa">
+                    <div id="spinner-galeria-{{ obra.ID_OBRA }}" class="spinner-overlay">
+                        <div class="spinner-loading-grande"></div>
+                    </div>
+                </div>
                 <p style="text-align: center; font-size: 11px; color: #888; margin: 0 0 15px 0; font-style: italic;">
                     👆 Clique na foto para ver a galeria
                 </p>

@@ -7,7 +7,7 @@
         <button type="button" id="btn-login-edit" onclick="mostrarAbaEdit('login')" style="flex: 1; padding: 10px; background: #e9ecef; color: #333; border: none; cursor: pointer;">Dados de Login/Acesso</button>
     </div>
 
-    <form hx-post="{% url 'salva_edicao_funcionario' %}" hx-target="#conteudo-dinamico" hx-indicator="#btn-salvar-alteracoes">
+    <form hx-post="{% url 'salva_edicao_funcionario' %}" hx-target="#conteudo-dinamico" hx-indicator="#btn-salvar-alteracoes" hx-confirm="Confirma as alterações deste funcionário?">
         {% csrf_token %}
 
         <input type="hidden" name="CPF_ORIGINAL" value="{{ funcionario.CPF }}">
@@ -39,7 +39,7 @@
             <input type="password" name="SENHA" placeholder="••••••••" style="width: 100%; margin-bottom: 15px; padding: 8px;">
 
             <button type="button" onclick="mostrarAbaEdit('dados')" style="padding: 10px; background: #6c757d; color: white; border: none; cursor: pointer;">⬅️ Voltar</button>
-            <button type="submit" id="btn-salvar" name="btn-salvar" class="seu-css-do-botao" style="padding: 12px 24px !important; 
+            <button type="submit" id="btn-salvar-alteracoes" name="btn-salvar" class="seu-css-do-botao" style="padding: 12px 24px !important;
                    background-color: #007bff !important; 
                    color: white !important; 
                    border: none !important; 

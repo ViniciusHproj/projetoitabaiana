@@ -226,11 +226,18 @@
     const tempoLimite = 2 * 60 * 1000; // TESTE: 2 minutos — lembrar de voltar para 3600 * 1000 depois
     let temporizador;
 
+    const urlLogoutBase = "{% url 'logout' %}";
+
     function encerrarSessaoPorInatividade() {
         if (!usuarioEstaLogado) return;
-        const urlLogout = "{% url 'logout' %}";
-        const formLogout = document.querySelector(`form[action="${urlLogout}"]`);
-        if (formLogout) { formLogout.submit(); } else { window.location.href = urlLogout; }
+        const urlLogout = urlLogoutBase + "?motivo=inatividade";
+        const formLogout = document.querySelector('form[action="' + urlLogoutBase + '"]');
+        if (formLogout) {
+            formLogout.action = urlLogout;
+            formLogout.submit();
+        } else {
+            window.location.href = urlLogout;
+        }
     }
 
     window.resetarTimer = function() {
@@ -238,12 +245,17 @@
         temporizador = setTimeout(encerrarSessaoPorInatividade, tempoLimite);
     };
 
+    // Só reinicia o timer em AÇÕES reais do usuário (clique em botão/link, navegação,
+    // submit de formulário) — não em mero movimento de mouse, scroll ou tecla solta.
     window.onload = resetarTimer;
-    window.onmousemove = resetarTimer;
-    window.onmousedown = resetarTimer;
-    window.onkeypress = resetarTimer;
-    window.onscroll = resetarTimer;
-    document.onclick = resetarTimer;
+
+    document.addEventListener('click', function(event) {
+        if (event.target.closest('button, a, input[type="submit"], .nav-link, .dropdown-item')) {
+            resetarTimer();
+        }
+    });
+
+    document.addEventListener('submit', resetarTimer);
 
     window.toggleDropdown = function(botaoClicado) {
         const menuAtual = botaoClicado.parentElement.querySelector('.dropdown-menu');

@@ -10,7 +10,7 @@
             <button type="button" id="btn-login" onclick="mostrarAba('login')" style="flex: 1; padding: 12px; background: #e9ecef; color: #333; border: none; cursor: pointer; font-weight: bold; transition: 0.3s;">Dados de Login</button>
         </div>
 
-        <form hx-post="{% url 'cadastro_funcionario' %}" hx-target="#conteudo-dinamico" hx-swap="innerHTML" hx-indicator="#btn-salvar">
+        <form hx-post="{% url 'cadastro_funcionario' %}" hx-target="#conteudo-dinamico" hx-swap="innerHTML" hx-indicator="#btn-salvar" hx-confirm="Confirma o cadastro deste funcionário?">
             {% csrf_token %}
 
             <div id="aba-dados" style="display: block;">

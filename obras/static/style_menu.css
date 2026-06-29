@@ -292,6 +292,30 @@ nav {
     pointer-events: none;
 }
 
+/* Overlay de carregamento para a foto da galeria (lista de obras) */
+.spinner-overlay {
+    display: none;
+    position: absolute;
+    inset: 0;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.35);
+    border-radius: 6px;
+}
+
+.htmx-request.spinner-overlay {
+    display: flex;
+}
+
+.spinner-loading-grande {
+    width: 32px;
+    height: 32px;
+    border: 4px solid rgba(255, 255, 255, 0.3);
+    border-radius: 50%;
+    border-top-color: #ffffff;
+    animation: girar 1s ease-in-out infinite;
+}
+
 @media (max-width: 768px) {
     .nav-inner {
         padding: 0 1rem;

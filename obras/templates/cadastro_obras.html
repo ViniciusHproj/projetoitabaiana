@@ -17,10 +17,11 @@
     </div>
 
     <div class="card">
-      <form hx-post="{% url 'Cadastro-Obras' %}" 
-            hx-target="#conteudo-dinamico" 
+      <form hx-post="{% url 'Cadastro-Obras' %}"
+            hx-target="#conteudo-dinamico"
             hx-encoding="multipart/form-data"
-            hx-indicator="#btn-salvar">
+            hx-indicator="#btn-salvar"
+            hx-confirm="Confirma o cadastro desta obra?">
         {% csrf_token %}
 
         <div class="form-grid">

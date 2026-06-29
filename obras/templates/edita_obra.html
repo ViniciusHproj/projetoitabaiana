@@ -17,7 +17,7 @@
   </div>
 
   <div class="card">
-    <form hx-post="{% url 'salva_edicao_obra' %}" hx-target="#conteudo-dinamico" hx-encoding="multipart/form-data" enctype="multipart/form-data" hx-indicator="#btn-salvar-alteracoes">
+    <form hx-post="{% url 'salva_edicao_obra' %}" hx-target="#conteudo-dinamico" hx-encoding="multipart/form-data" enctype="multipart/form-data" hx-indicator="#btn-salvar-alteracoes" hx-confirm="Confirma as alterações nesta obra?">
       {% csrf_token %}
       
       <input type="hidden" name="ID_OBRA" value="{{ obra.ID_OBRA }}">

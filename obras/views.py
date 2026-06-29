@@ -1,10 +1,13 @@
 import os
 import logging
+import threading
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from django.shortcuts import render, redirect
 from pymongo import MongoClient
+from pymongo.errors import DuplicateKeyError
 from django.contrib import messages
+from django.core.cache import cache
 import ntplib
 from datetime import datetime
 from django.contrib.auth.decorators import login_required, user_passes_test
@@ -19,6 +22,32 @@ from django.contrib.messages import get_messages # Adicione este import no topo
 
 logger = logging.getLogger(__name__)
 
+
+def _disparar_em_background(funcao, *args, **kwargs):
+    """
+    Executa uma chamada de rede "melhor esforço" (ex: Google Sheets) numa thread
+    separada, sem bloquear a resposta ao usuário. Falhas são apenas logadas —
+    o Mongo já é a fonte de verdade, a planilha é só espelhamento.
+    """
+    def _executar():
+        try:
+            funcao(*args, **kwargs)
+        except Exception:
+            logger.exception("Erro ao executar tarefa em segundo plano: %s", funcao.__name__)
+
+    threading.Thread(target=_executar, daemon=True).start()
+
+
+CACHE_KEY_VERSAO_OBRAS = 'obras_cache_versao'
+
+
+def _bump_cache_obras():
+    """Invalida o cache de lista_obras após qualquer cadastro/edição de obra."""
+    try:
+        cache.incr(CACHE_KEY_VERSAO_OBRAS)
+    except ValueError:
+        cache.set(CACHE_KEY_VERSAO_OBRAS, 1)
+
 # Cliente único reaproveitado entre requests (pymongo já faz pool de conexões internamente).
 # connect=False adia a resolução de DNS/conexão real para o primeiro uso, em vez de travar
 # a inicialização do Django caso o banco esteja temporariamente inacessível.
@@ -27,6 +56,13 @@ _db = _mongo_client[os.environ['MONGODB_DB_NAME']]
 colecao_obras = _db['Banco_Obras']
 colecao_funcionarios = _db['Banco_funcionarios']
 colecao_timelapse = _db['Banco_Timelapse']
+
+try:
+    # Garante (de forma idempotente) que dois cadastros nunca gravem o mesmo ID_OBRA,
+    # mesmo em corrida simultânea — ver retry em cadastro_obras.
+    colecao_obras.create_index('ID_OBRA', unique=True)
+except Exception:
+    logger.exception("Não foi possível garantir o índice único em ID_OBRA")
 
 GOOGLE_SHEETS_CREDENTIALS_FILE = os.environ.get('GOOGLE_SHEETS_CREDENTIALS_FILE', 'credenciais.json')
 GOOGLE_SHEETS_SPREADSHEET_NAME = os.environ.get('GOOGLE_SHEETS_SPREADSHEET_NAME', 'Data base OBRAS DE ITABIANA')
@@ -103,7 +139,10 @@ def login_view(request):
 def logout_view(request):
     if request.user.is_authenticated:
         auth_logout(request)
-        messages.info(request, "👋 Deslogando do sistema... Até logo!")
+        if request.GET.get('motivo') == 'inatividade':
+            messages.warning(request, "⏱️ Sua sessão foi encerrada automaticamente por inatividade. Faça login novamente.")
+        else:
+            messages.info(request, "👋 Deslogando do sistema... Até logo!")
     return redirect('inicio') # Ou 'login', dependendo de onde você quer que ele caia
 
 def staff_required(view_func):
@@ -449,23 +488,8 @@ def cadastro_obras(request):
                 messages.warning(request, "⚠️ A Data de Início não pode ser maior que a Data de Finalização.")
                 return render(request, 'cadastro_obras.html', {'dados': request.POST})
             
-            # 3. GERAÇÃO DE ID
-            colecao = colecao_obras
-
-            if id_obra_manual:
-                id_obra_gerado = id_obra_manual
-            else:
-                ano_atual = pegar_ano_google()
-                filtro_ano = {"ID_OBRA": {"$regex": f"{ano_atual}$"}}
-                contagem_ano = colecao.count_documents(filtro_ano)
-                proximo_numero = contagem_ano + 1
-                id_obra_gerado = f"{proximo_numero}{ano_atual}"
-
-            if colecao.find_one({"ID_OBRA": id_obra_gerado}):
-                messages.error(request, f"⚠️ O ID {id_obra_gerado} já está cadastrado no Banco de Dados!")
-                return render(request, 'cadastro_obras.html', {'dados': request.POST})
-
             # 4. UPLOAD MÚLTIPLO (Cloudinary)
+            colecao = colecao_obras
             urls_galeria = []
             try:
                 for foto in fotos_arquivos:
@@ -488,27 +512,58 @@ def cadastro_obras(request):
             # Padronização da Empresa para a Planilha
             empresa_completa = f"{nome_empresa.upper()} - CNPJ - {cnpj_empresa}"
             agora = datetime.now()
+            ano_atual = pegar_ano_google()
 
-            nova_obra = {
-                'ID_OBRA': id_obra_gerado,
-                'TIPO_OBRA': tipo_obra,      # Ex: PAVIMENTAÇÃO (Maiúsculo)
-                'SITUACAO': situacao,        # Ex: Em andamento (Como na planilha)
-                'VALOR_OBRA': valor_obra,
-                'DATA_INICIO': formatar_data_br(data_inicio),
-                'CONCLUSAO_PREVISTA': formatar_data_br(conclusao_prevista),
-                'DATA_FINALIZACAO': formatar_data_br(data_finalizacao) if data_finalizacao else "—",
-                'NOME_EMPRESA': nome_empresa, 
-                'CNPJ_EMPRESA': cnpj_empresa,
-                'EMPRESA_CONTRATADA': empresa_completa, # Padronizado para o Looker
-                'TIPO_EXECUCAO': tipo_execucao,  # Ex: Nova Construção (Como na planilha)
-                'ENDERECO': endereco,
-                'URL_FOTO': url_da_foto_capa,
-                'GALERIA': urls_galeria,
-                'DATA_CADASTRO': agora.strftime('%d/%m/%Y %H:%M:%S'), 
-                'TIMESTAMP_CADASTRO': agora
-            }
-            
-            # 6. HISTÓRICO (TIMELAPSE)
+            # ==========================================
+            # 6. GERAÇÃO DE ID + SALVAMENTO ATÔMICO
+            # ==========================================
+            # O número usado é sempre recalculado a partir da contagem real de obras do
+            # ano no momento da tentativa — por isso não fica "buraco" na numeração quando
+            # uma obra é excluída. Um índice único em ID_OBRA garante que, se duas
+            # requisições colidirem no mesmo número ao mesmo tempo, o MongoDB rejeita a
+            # segunda inserção (DuplicateKeyError) e o código recalcula e tenta de novo
+            # automaticamente, sem nunca duplicar um ID.
+            resultado = None
+            id_obra_gerado = id_obra_manual or None
+
+            for _tentativa in range(10):
+                if not id_obra_manual:
+                    contagem_ano = colecao.count_documents({"ID_OBRA": {"$regex": f"{ano_atual}$"}})
+                    id_obra_gerado = f"{contagem_ano + 1}{ano_atual}"
+
+                nova_obra = {
+                    'ID_OBRA': id_obra_gerado,
+                    'TIPO_OBRA': tipo_obra,      # Ex: PAVIMENTAÇÃO (Maiúsculo)
+                    'SITUACAO': situacao,        # Ex: Em andamento (Como na planilha)
+                    'VALOR_OBRA': valor_obra,
+                    'DATA_INICIO': formatar_data_br(data_inicio),
+                    'CONCLUSAO_PREVISTA': formatar_data_br(conclusao_prevista),
+                    'DATA_FINALIZACAO': formatar_data_br(data_finalizacao) if data_finalizacao else "—",
+                    'NOME_EMPRESA': nome_empresa,
+                    'CNPJ_EMPRESA': cnpj_empresa,
+                    'EMPRESA_CONTRATADA': empresa_completa, # Padronizado para o Looker
+                    'TIPO_EXECUCAO': tipo_execucao,  # Ex: Nova Construção (Como na planilha)
+                    'ENDERECO': endereco,
+                    'URL_FOTO': url_da_foto_capa,
+                    'GALERIA': urls_galeria,
+                    'DATA_CADASTRO': agora.strftime('%d/%m/%Y %H:%M:%S'),
+                    'TIMESTAMP_CADASTRO': agora
+                }
+
+                try:
+                    resultado = colecao.insert_one(nova_obra)
+                    break
+                except DuplicateKeyError:
+                    if id_obra_manual:
+                        messages.error(request, f"⚠️ O ID {id_obra_manual} já está cadastrado no Banco de Dados!")
+                        return render(request, 'cadastro_obras.html', {'dados': request.POST})
+                    continue  # outro cadastro pegou esse número primeiro: recalcula e tenta de novo
+
+            if resultado is None:
+                messages.error(request, "⚠️ Não foi possível gerar um ID de obra único. Tente novamente.")
+                return redirect('Cadastro-Obras')
+
+            # 7. HISTÓRICO (TIMELAPSE) — só agora que o ID final está confirmado
             try:
                 colecao_historico = colecao_timelapse
                 registros = [{
@@ -521,20 +576,12 @@ def cadastro_obras(request):
                 if registros: colecao_historico.insert_many(registros)
             except Exception as e: print(f"Erro Timelapse: {e}")
 
-            # 7. SALVAR NO MONGODB
-            resultado = colecao.insert_one(nova_obra)
-
-            # 8. SALVAR NO GOOGLE SHEETS
+            # 8. SALVAR NO GOOGLE SHEETS (em segundo plano: a planilha é só espelhamento
+            # best-effort e não deve atrasar a resposta ao usuário)
             if resultado.inserted_id:
-                try:
-                    status_planilha = salvar_no_google_sheets(nova_obra)
-                    msg = f"✅ Obra {id_obra_gerado} salva no MongoDB!"
-                    if status_planilha != "EXISTIA": msg += " E enviada à Planilha!"
-                    messages.success(request, msg)
-                except Exception:
-                    logger.exception("Erro ao salvar obra na Planilha do Google")
-                    messages.warning(request, "⚠️ Salvo no Banco, mas houve um erro ao enviar para a Planilha.")
-
+                _disparar_em_background(salvar_no_google_sheets, nova_obra)
+                _bump_cache_obras()
+                messages.success(request, f"✅ Obra {id_obra_gerado} salva com sucesso!")
                 return redirect('Cadastro-Obras')
 
         except Exception:
@@ -700,16 +747,13 @@ def salva_edicao_obra(request):
                 )
 
             # ==========================================
-            # 8. ATUALIZAÇÃO NO GOOGLE SHEETS
+            # 8. ATUALIZAÇÃO NO GOOGLE SHEETS (em segundo plano, mesma lógica do cadastro)
             # ==========================================
-            try:
-                dados_para_sheets = dados_atualizados.copy()
-                dados_para_sheets['ID_OBRA'] = id_obra
-                atualizar_no_google_sheets(dados_para_sheets)
-                messages.success(request, f"✅ Obra {id_obra} atualizada com sucesso em todos os sistemas!")
-            except Exception:
-                logger.exception("Erro ao atualizar obra na Planilha do Google")
-                messages.warning(request, "✅ Banco atualizado, mas houve um erro na Planilha.")
+            dados_para_sheets = dados_atualizados.copy()
+            dados_para_sheets['ID_OBRA'] = id_obra
+            _disparar_em_background(atualizar_no_google_sheets, dados_para_sheets)
+            _bump_cache_obras()
+            messages.success(request, f"✅ Obra {id_obra} atualizada com sucesso!")
 
             if request.headers.get('HX-Request'):
                 return render(request, 'busca_atualiza_obra.html')
@@ -723,32 +767,43 @@ def salva_edicao_obra(request):
 
 
 def lista_obras(request):
-    # Busca as obras paginadas (mais recentes primeiro), evitando carregar a coleção inteira
+    # Busca as obras paginadas (mais recentes primeiro), evitando carregar a coleção inteira.
+    # Resultado fica em cache por CACHE_TTL_SEGUNDOS, invalidado automaticamente a cada
+    # cadastro/edição de obra (via _bump_cache_obras), para não reler o Mongo a cada visita.
     pagina_num = request.GET.get('pagina', 1)
     TAMANHO_PAGINA = 12
+    CACHE_TTL_SEGUNDOS = 120
 
-    total_obras = colecao_obras.count_documents({})
     try:
         pagina_num = int(pagina_num)
     except (TypeError, ValueError):
         pagina_num = 1
-    total_paginas = max(1, -(-total_obras // TAMANHO_PAGINA))
-    pagina_num = max(1, min(pagina_num, total_paginas))
+    pagina_num = max(1, pagina_num)
 
-    obras = list(
-        colecao_obras.find()
-        .sort('TIMESTAMP_CADASTRO', -1)
-        .skip((pagina_num - 1) * TAMANHO_PAGINA)
-        .limit(TAMANHO_PAGINA)
-    )
+    versao_cache = cache.get(CACHE_KEY_VERSAO_OBRAS, 0)
+    chave_cache = f'lista_obras_v{versao_cache}_p{pagina_num}'
+    contexto = cache.get(chave_cache)
 
-    contexto = {
-        'obras': obras,
-        'pagina_atual': pagina_num,
-        'total_paginas': total_paginas,
-        'tem_anterior': pagina_num > 1,
-        'tem_proxima': pagina_num < total_paginas,
-    }
+    if contexto is None:
+        total_obras = colecao_obras.count_documents({})
+        total_paginas = max(1, -(-total_obras // TAMANHO_PAGINA))
+        pagina_num = max(1, min(pagina_num, total_paginas))
+
+        obras = list(
+            colecao_obras.find()
+            .sort('TIMESTAMP_CADASTRO', -1)
+            .skip((pagina_num - 1) * TAMANHO_PAGINA)
+            .limit(TAMANHO_PAGINA)
+        )
+
+        contexto = {
+            'obras': obras,
+            'pagina_atual': pagina_num,
+            'total_paginas': total_paginas,
+            'tem_anterior': pagina_num > 1,
+            'tem_proxima': pagina_num < total_paginas,
+        }
+        cache.set(chave_cache, contexto, CACHE_TTL_SEGUNDOS)
 
     # Renderiza a página completa
     return render(request, 'lista_obras.html', contexto)
