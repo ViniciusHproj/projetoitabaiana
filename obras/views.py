@@ -138,11 +138,11 @@ def login_view(request):
     return render(request, 'login.html')
 def logout_view(request):
     if request.user.is_authenticated:
-        auth_logout(request)
         if request.GET.get('motivo') == 'inatividade':
             messages.warning(request, "⏱️ Sua sessão foi encerrada automaticamente por inatividade. Faça login novamente.")
         else:
             messages.info(request, "👋 Deslogando do sistema... Até logo!")
+        auth_logout(request)
     return redirect('inicio') # Ou 'login', dependendo de onde você quer que ele caia
 
 def staff_required(view_func):
