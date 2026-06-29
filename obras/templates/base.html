@@ -223,7 +223,7 @@
     };
 
     const usuarioEstaLogado = "{{ user.is_authenticated|yesno:'true,false' }}" === "true";
-    const tempoLimite = 3600 * 1000; 
+    const tempoLimite = 2 * 60 * 1000; // TESTE: 2 minutos — lembrar de voltar para 3600 * 1000 depois
     let temporizador;
 
     function encerrarSessaoPorInatividade() {
