@@ -153,8 +153,7 @@ LOGIN_URL = 'login'
 
 # --- CONFIGURAÇÃO DE SESSÃO ---
 
-# TESTE: sessão dura 2 minutos (120 segundos) — lembrar de voltar para 3600 depois do teste
-SESSION_COOKIE_AGE = 120
+SESSION_COOKIE_AGE = 1800  # 30 minutos
 
 # Muito importante: toda vez que o usuário clica em algo, o cronômetro volta para 1 hora.
 # Isso garante que a sessão só caia por INATIVIDADE real.

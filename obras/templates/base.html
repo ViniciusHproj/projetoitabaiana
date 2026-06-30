@@ -2,13 +2,23 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
+  <script>
+    // Aplica o tema antes do render para evitar flash
+    (function() {
+      const salvo = localStorage.getItem('tema');
+      const prefereDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      if (salvo === 'dark' || (!salvo && prefereDark)) {
+        document.documentElement.setAttribute('data-theme', 'dark');
+      }
+    })();
+  </script>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Painel De Gestão de Obras</title>
   <link rel="icon" href="{% static 'logo.jpeg' %}" type="image/png">
   <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="{% static 'style_menu.css' %}" />
-  <link rel="stylesheet" href="{% static 'style_obrascadastro.css' %}" />
+  <link rel="stylesheet" href="{% static 'style_nav.css' %}" />
+  <link rel="stylesheet" href="{% static 'style_obras.css' %}" />
   <script src="{% static 'script_menu.js' %}"></script>
   <script src="https://unpkg.com/htmx.org@1.9.10"></script>
   {% block extra_css %}{% endblock %}
@@ -188,8 +198,11 @@
         <li>
           <form action="{% url 'logout' %}" method="post" style="display: inline; width: 100%;">
               {% csrf_token %}
-              <button type="submit" class="nav-link" style="background: none; border: none; cursor: pointer; color: #d9534f !important; font-weight: bold;">Sair</button>
+              <button type="submit" class="nav-link" style="background: white; border: 1.5px solid #d9534f; border-radius: 6px; cursor: pointer; color: #d9534f !important; font-weight: bold; padding: 5px 14px;">Sair</button>
           </form>
+        </li>
+        <li>
+          <button class="btn-tema" id="btn-tema" onclick="alternarTema()" title="Alternar tema claro/escuro">🌙</button>
         </li>
 
         {% else %}
@@ -223,7 +236,7 @@
     };
 
     const usuarioEstaLogado = "{{ user.is_authenticated|yesno:'true,false' }}" === "true";
-    const tempoLimite = 2 * 60 * 1000; // TESTE: 2 minutos — lembrar de voltar para 3600 * 1000 depois
+    const tempoLimite = 30 * 60 * 1000; // 30 minutos
     let temporizador;
 
     const urlLogoutBase = "{% url 'logout' %}";
@@ -304,6 +317,26 @@
         });
     };
     window.addEventListener('load', processarMensagens);
+
+    function atualizarIconeTema() {
+        const escuro = document.documentElement.getAttribute('data-theme') === 'dark';
+        const btn = document.getElementById('btn-tema');
+        if (btn) btn.textContent = escuro ? '☀️' : '🌙';
+    }
+
+    window.alternarTema = function() {
+        const escuro = document.documentElement.getAttribute('data-theme') === 'dark';
+        if (escuro) {
+            document.documentElement.removeAttribute('data-theme');
+            localStorage.setItem('tema', 'light');
+        } else {
+            document.documentElement.setAttribute('data-theme', 'dark');
+            localStorage.setItem('tema', 'dark');
+        }
+        atualizarIconeTema();
+    };
+
+    window.addEventListener('load', atualizarIconeTema);
 </script>
 </body>
 </html>

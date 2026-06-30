@@ -28,11 +28,14 @@ class SessaoExpiradaMiddleware:
 
         response = self.get_response(request)
 
-        # Ignora a própria rota de logout: ali o logout_view já cuida da
-        # mensagem certa (manual vs. inatividade via ?motivo=inatividade).
+        # Ignora a própria rota de logout (logout_view já redireciona com o
+        # aviso certo) e a rota de login (login_view já lê ?aviso= e mostra a
+        # mensagem certa) — sem isso, a sessão nova/vazia criada nesse meio
+        # tempo é detectada aqui de novo e duplica o aviso na página seguinte.
         eh_rota_logout = request.path == reverse('logout')
+        eh_rota_login = request.path == reverse('login')
 
-        if sessao_invalida and not eh_rota_logout:
+        if sessao_invalida and not eh_rota_logout and not eh_rota_login:
             messages.warning(
                 request,
                 "⏱️ Sua sessão expirou por inatividade. Faça login novamente."

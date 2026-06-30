@@ -1,101 +1,141 @@
-<div class="container" style="max-width: 600px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px;">{% include 'partial_messages.html' %}
-    
-    <h2>Editar Funcionário: {{ funcionario.NOME }}</h2>
+{% load static %}
+<link rel="stylesheet" href="{% static 'style_obras.css' %}" />
 
-    <div style="display: flex; border-bottom: 2px solid #ccc; margin-bottom: 20px;">
-        <button type="button" id="btn-dados-edit" onclick="mostrarAbaEdit('dados')" style="flex: 1; padding: 10px; background: #007bff; color: white; border: none; cursor: pointer;">Dados Pessoais</button>
-        <button type="button" id="btn-login-edit" onclick="mostrarAbaEdit('login')" style="flex: 1; padding: 10px; background: #e9ecef; color: #333; border: none; cursor: pointer;">Dados de Login/Acesso</button>
+<div class="wrap">{% include 'partial_messages.html' %}
+  <div class="card">
+    <div class="header">
+      <div class="header-icon">
+        <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+          <circle cx="9" cy="6" r="3.5" fill="#854F0B" opacity=".8"/>
+          <path d="M2 15c0-3.314 3.134-6 7-6s7 2.686 7 6" stroke="#854F0B" stroke-width="1.5" stroke-linecap="round" fill="none" opacity=".5"/>
+        </svg>
+      </div>
+      <div>
+        <div class="header-title">Editar Funcionário</div>
+        <div class="header-sub">{{ funcionario.NOME }}</div>
+      </div>
+    </div>
+    <div class="divider" style="margin-top: 0;"></div>
+
+    <div class="tab-row">
+      <button type="button" id="btn-dados-edit" class="tab-btn tab-ativo" onclick="mostrarAbaEdit('dados')">Dados Pessoais</button>
+      <button type="button" id="btn-login-edit" class="tab-btn" onclick="mostrarAbaEdit('login')">Dados de Login</button>
     </div>
 
     <form hx-post="{% url 'salva_edicao_funcionario' %}" hx-target="#conteudo-dinamico" hx-indicator="#btn-salvar-alteracoes" hx-confirm="Confirma as alterações deste funcionário?">
-        {% csrf_token %}
+      {% csrf_token %}
+      <input type="hidden" name="CPF_ORIGINAL" value="{{ funcionario.CPF }}">
 
-        <input type="hidden" name="CPF_ORIGINAL" value="{{ funcionario.CPF }}">
+      <div id="aba-dados-edit">
+        <div class="form-grid">
+          <div class="field full">
+            <label>Nome Completo</label>
+            <input type="text" name="NOME" value="{{ funcionario.NOME }}" style="text-transform: uppercase" />
+          </div>
 
-        <div id="aba-dados-edit" style="display: block;">
-            <label>Nome Completo:</label>
-            <input type="text" name="NOME" value="{{ funcionario.NOME }}" style="width: 100%; margin-bottom: 15px; padding: 8px; text-transform: uppercase;">
+          <div class="field">
+            <label>Data de Nascimento</label>
+            <input type="date" name="DATA_NASCIMENTO" value="{{ funcionario.DATA_NASCIMENTO }}" />
+          </div>
 
-            <label>Data de Nascimento:</label>
-            <input type="date" name="DATA_NASCIMENTO" value="{{ funcionario.DATA_NASCIMENTO }}" style="width: 100%; margin-bottom: 15px; padding: 8px;">
-
-            <label>RG:</label>
-            <input type="text" name="RG" value="{{ funcionario.RG }}" maxlength="12" oninput="mascaraRG(this)" style="width: 100%; margin-bottom: 15px; padding: 8px;">
-            
-            <button type="button" onclick="mostrarAbaEdit('login')" style="padding: 10px; background: #28a745; color: white; border: none; cursor: pointer;">Próximo ➡️</button>
+          <div class="field">
+            <label>RG</label>
+            <input type="text" name="RG" value="{{ funcionario.RG }}" maxlength="12" oninput="mascaraRG(this)" />
+          </div>
         </div>
 
-        <div id="aba-login-edit" style="display: none;">
-            <label>CPF (Login):</label>
-            <input type="text" name="CPF" value="{{ funcionario.CPF }}" readonly style="width: 100%; margin-bottom: 15px; padding: 8px; background-color: #f0f0f0;" title="O CPF não pode ser alterado por segurança.">
-            
-            <label>Função no Sistema:</label>
-            <select name="FUNCAO" style="width: 100%; margin-bottom: 15px; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
-                <option value="COMUM" {% if funcionario.FUNCAO == 'COMUM' %}selected{% endif %}>COMUM</option>
-                <option value="SUPERVISOR" {% if funcionario.FUNCAO == 'SUPERVISOR' %}selected{% endif %}>SUPERVISOR</option>
+        <div class="btn-row" style="margin-top: 1.25rem;">
+          <button type="button" class="btn-primary" onclick="mostrarAbaEdit('login')">Próximo →</button>
+        </div>
+      </div>
+
+      <div id="aba-login-edit" style="display: none;">
+        <div class="form-grid">
+          <div class="field full">
+            <label>CPF (Login)</label>
+            <input type="text" name="CPF" value="{{ funcionario.CPF }}" readonly style="background:#f0f0f0; cursor: not-allowed;" title="O CPF não pode ser alterado por segurança." />
+          </div>
+
+          <div class="field full">
+            <label>Função no Sistema</label>
+            <select name="FUNCAO">
+              <option value="COMUM" {% if funcionario.FUNCAO == 'COMUM' %}selected{% endif %}>FUNCIONÁRIO COMUM (Apenas cadastra obras)</option>
+              <option value="SUPERVISOR" {% if funcionario.FUNCAO == 'SUPERVISOR' %}selected{% endif %}>SUPERVISOR (Pode cadastrar outros)</option>
             </select>
-            
-            <label>Nova Senha (Deixe em branco para NÃO alterar):</label>
-            <input type="password" name="SENHA" placeholder="••••••••" style="width: 100%; margin-bottom: 15px; padding: 8px;">
+          </div>
 
-            <button type="button" onclick="mostrarAbaEdit('dados')" style="padding: 10px; background: #6c757d; color: white; border: none; cursor: pointer;">⬅️ Voltar</button>
-            <button type="submit" id="btn-salvar-alteracoes" name="btn-salvar" class="seu-css-do-botao" style="padding: 12px 24px !important;
-                   background-color: #007bff !important; 
-                   color: white !important; 
-                   border: none !important; 
-                   border-radius: 6px !important; 
-                   cursor: pointer !important; 
-                   font-weight: 600 !important; 
-                   font-size: 16px !important;
-                   display: inline-flex !important; 
-                   align-items: center !important; 
-                   justify-content: center !important; 
-                   gap: 10px !important;
-                   transition: background-color 0.2s;">
-                <span class="texto-botao">Salvar Alterações</span>
-                <div class="spinner-loading"></div>
-            </button>
+          <div class="field full">
+            <label>Nova Senha (deixe em branco para não alterar)</label>
+            <input type="password" name="SENHA" placeholder="••••••••" />
+          </div>
         </div>
+
+        <div class="btn-row" style="margin-top: 1.25rem;">
+          <button type="button" class="btn-ghost" onclick="mostrarAbaEdit('dados')">← Voltar</button>
+          <button type="submit" id="btn-salvar-alteracoes" name="btn-salvar" class="btn-primary">
+            <span class="texto-botao">Salvar Alterações</span>
+            <div class="spinner-loading"></div>
+          </button>
+        </div>
+      </div>
     </form>
+  </div>
 </div>
 
+<style>
+  .tab-row {
+    display: flex;
+    border-bottom: 0.5px solid rgba(0,0,0,0.12);
+    margin-bottom: 1.25rem;
+    gap: 4px;
+  }
+  .tab-btn {
+    flex: 1;
+    padding: 9px 14px;
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 13px;
+    font-weight: 500;
+    color: #888;
+    cursor: pointer;
+    transition: color .15s, border-color .15s;
+    margin-bottom: -1px;
+  }
+  .tab-btn.tab-ativo {
+    color: var(--btn-primary-color, #633806);
+    border-bottom-color: var(--btn-primary-color, #633806);
+  }
+</style>
+
 <script>
-    // Reaproveitando suas funções de máscara
-    function mascaraCPF(input) {
-        let v = input.value.replace(/\D/g, "");
-        if (v.length <= 11) {
-            v = v.replace(/(\d{3})(\d)/, "$1.$2");
-            v = v.replace(/(\d{3})(\d)/, "$1.$2");
-            v = v.replace(/(\d{3})(\d{1,2})$/, "$1-$2");
-        }
-        input.value = v;
+  function mascaraRG(input) {
+    let v = input.value.replace(/\D/g, "");
+    if (v.length <= 9) {
+      v = v.replace(/(\d{2})(\d)/, "$1.$2");
+      v = v.replace(/(\d{3})(\d)/, "$1.$2");
+      v = v.replace(/(\d{3})(\d{1})$/, "$1-$2");
     }
+    input.value = v;
+  }
 
-    function mascaraRG(input) {
-        let v = input.value.replace(/\D/g, "");
-        if (v.length <= 9) {
-            v = v.replace(/(\d{2})(\d)/, "$1.$2");
-            v = v.replace(/(\d{3})(\d)/, "$1.$2");
-            v = v.replace(/(\d{3})(\d{1})$/, "$1-$2");
-        }
-        input.value = v;
-    }
+  function mostrarAbaEdit(aba) {
+    const btnDados = document.getElementById('btn-dados-edit');
+    const btnLogin = document.getElementById('btn-login-edit');
+    const divDados = document.getElementById('aba-dados-edit');
+    const divLogin = document.getElementById('aba-login-edit');
 
-    function mostrarAbaEdit(aba) {
-        if (aba === 'dados') {
-            document.getElementById('aba-dados-edit').style.display = 'block';
-            document.getElementById('aba-login-edit').style.display = 'none';
-            document.getElementById('btn-dados-edit').style.background = '#007bff';
-            document.getElementById('btn-dados-edit').style.color = 'white';
-            document.getElementById('btn-login-edit').style.background = '#e9ecef';
-            document.getElementById('btn-login-edit').style.color = '#333';
-        } else {
-            document.getElementById('aba-dados-edit').style.display = 'none';
-            document.getElementById('aba-login-edit').style.display = 'block';
-            document.getElementById('btn-login-edit').style.background = '#007bff';
-            document.getElementById('btn-login-edit').style.color = 'white';
-            document.getElementById('btn-dados-edit').style.background = '#e9ecef';
-            document.getElementById('btn-dados-edit').style.color = '#333';
-        }
+    if (aba === 'dados') {
+      divDados.style.display = 'block';
+      divLogin.style.display = 'none';
+      btnDados.classList.add('tab-ativo');
+      btnLogin.classList.remove('tab-ativo');
+    } else {
+      divDados.style.display = 'none';
+      divLogin.style.display = 'block';
+      btnLogin.classList.add('tab-ativo');
+      btnDados.classList.remove('tab-ativo');
     }
+  }
 </script>

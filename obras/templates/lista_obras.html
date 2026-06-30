@@ -26,7 +26,40 @@
         flex-direction: column;
         box-sizing: border-box;
         width: 100%;
-        overflow: hidden; /* Evita que o conteúdo vaze */
+        overflow: hidden;
+    }
+
+    [data-theme="dark"] .cartao-obra {
+        background: #1e2128 !important;
+        border-color: rgba(255,255,255,0.08) !important;
+        color: #e2e4e9 !important;
+    }
+
+    [data-theme="dark"] .cartao-obra h3 {
+        color: #6baee8 !important;
+    }
+
+    [data-theme="dark"] .cartao-obra p,
+    [data-theme="dark"] .cartao-obra strong {
+        color: #c8d0dc !important;
+    }
+
+    [data-theme="dark"] .cartao-obra hr {
+        border-color: rgba(255,255,255,0.08) !important;
+    }
+
+    [data-theme="dark"] .cartao-obra [style*="background: #f8f9fa"],
+    [data-theme="dark"] .cartao-obra [style*="background:#f8f9fa"] {
+        background: #252930 !important;
+    }
+
+    [data-theme="dark"] .cartao-obra [style*="background: #e9ecef"] {
+        background: #252930 !important;
+        color: #6b7280 !important;
+    }
+
+    [data-theme="dark"] h2 {
+        color: #c8d0dc !important;
     }
 
     /* Mágica para Celulares (telas menores que 768px) */

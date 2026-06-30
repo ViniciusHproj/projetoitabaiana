@@ -1,27 +1,41 @@
 {% include 'partial_messages.html' %}
 
-<div class="container" style="padding: 40px 20px; max-width: 500px; margin: 40px auto; background: white; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1);">
-    <h3 style="color: #007bff; margin-bottom: 10px; text-align: center;">Atualizar Obra</h3>
-    <p style="text-align: center; color: #6c757d; margin-bottom: 25px;">Digite o ID da obra que deseja editar.</p>
+<div class="wrap">
+  <div class="card">
+    <div class="header">
+      <div class="header-icon">
+        <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+          <rect x="2" y="10" width="14" height="6" rx="1" fill="#854F0B" />
+          <rect x="5" y="5" width="8" height="6" rx="1" fill="#854F0B" opacity=".6" />
+          <rect x="8" y="2" width="2" height="4" rx="1" fill="#854F0B" opacity=".4" />
+        </svg>
+      </div>
+      <div>
+        <div class="header-title">Atualização de Obras</div>
+        <div class="header-sub">Digite o ID da obra que deseja editar</div>
+      </div>
+    </div>
+    <div class="divider" style="margin-top: 0;"></div>
 
     <form hx-post="{% url 'busca_atualiza_obra' %}"
           hx-target="#conteudo-dinamico"
           hx-swap="innerHTML"
           hx-indicator="#btn-buscar-obra">
-        {% csrf_token %}
+      {% csrf_token %}
 
-        <div style="margin-bottom: 20px;">
-            <label style="font-weight: bold; color: #333; display: block; margin-bottom: 8px;">ID da Obra:</label>
-            <input type="text"
-                   name="ID_OBRA"
-                   required
-                   placeholder="Ex: 112025"
-                   style="width: 100%; padding: 12px; border: 1px solid #ced4da; border-radius: 4px; font-size: 16px; box-sizing: border-box;">
+      <div class="form-grid">
+        <div class="field full">
+          <label>ID da Obra</label>
+          <input type="text" name="ID_OBRA" required placeholder="Ex: 112025" />
         </div>
+      </div>
 
-        <button type="submit" id="btn-buscar-obra" style="width: 100%; padding: 12px; background-color: #007bff; color: white; border: none; border-radius: 4px; font-size: 16px; cursor: pointer; font-weight: bold; transition: background 0.3s; display: inline-flex; align-items: center; justify-content: center; gap: 10px;">
-            🔍 Buscar Obra
-            <div class="spinner-loading"></div>
+      <div class="btn-row">
+        <button type="submit" id="btn-buscar-obra" class="btn-primary">
+          <span class="texto-botao">🔍 Buscar Obra</span>
+          <div class="spinner-loading"></div>
         </button>
+      </div>
     </form>
+  </div>
 </div>

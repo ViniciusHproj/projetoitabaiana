@@ -9,11 +9,33 @@
     --text-light: #f0f6ff;
     --shadow: 0 4px 16px rgba(45, 100, 170, 0.18);
     --radius: 8px;
+    /* Tema */
+    --bg-body: #f3f7fb;
+    --dropdown-bg: #ffffff;
+    --dropdown-text: #2c4a6e;
+    --dropdown-label: #8aafd4;
+    --dropdown-icon-bg: #e8f1fb;
+    --dropdown-divider: #eaf0f8;
+    --welcome-card-bg: #ffffff;
+    --welcome-title: #1e3d5e;
+    --welcome-text: #6b8aaa;
+}
+
+[data-theme="dark"] {
+    --bg-body: #16181d;
+    --dropdown-bg: #1e2128;
+    --dropdown-text: #c0cce0;
+    --dropdown-label: #4a6a8a;
+    --dropdown-icon-bg: #1a2840;
+    --dropdown-divider: #252d3a;
+    --welcome-card-bg: #1e2128;
+    --welcome-title: #c8d8ee;
+    --welcome-text: #7a94b0;
 }
 
 body {
     font-family: 'Nunito', sans-serif;
-    background: #f3f7fb;
+    background: var(--bg-body);
     min-height: 100vh;
 }
 
@@ -130,7 +152,7 @@ nav {
     top: calc(100% + 8px);
     left: 0;
     min-width: 220px;
-    background: var(--white);
+    background: var(--dropdown-bg);
     border-radius: var(--radius);
     box-shadow: 0 8px 28px rgba(45,100,170,0.18), 0 1px 4px rgba(0,0,0,0.06);
     overflow: hidden;
@@ -152,7 +174,7 @@ nav {
     font-weight: 700;
     letter-spacing: 0.7px;
     text-transform: uppercase;
-    color: #8aafd4;
+    color: var(--dropdown-label);
 }
 
 .dropdown-item {
@@ -160,7 +182,7 @@ nav {
     align-items: center;
     gap: 10px;
     padding: 11px 16px;
-    color: #2c4a6e;
+    color: var(--dropdown-text);
     font-size: 14px;
     font-weight: 600;
     text-decoration: none;
@@ -173,11 +195,104 @@ nav {
     color: var(--blue-dark);
 }
 
+[data-theme="dark"] .dropdown-item:hover {
+    background: #1a2840;
+    color: #90c0f0;
+}
+
+/* ── DARK MODE: overrides globais para inline styles e cores fixas ── */
+[data-theme="dark"] body,
+[data-theme="dark"] main,
+[data-theme="dark"] .page-content {
+    background: #16181d !important;
+    color: #e2e4e9 !important;
+}
+
+[data-theme="dark"] h1,
+[data-theme="dark"] h2,
+[data-theme="dark"] h3,
+[data-theme="dark"] h4,
+[data-theme="dark"] p,
+[data-theme="dark"] label,
+[data-theme="dark"] span:not(.nav-logo-text):not(.texto-botao),
+[data-theme="dark"] small,
+[data-theme="dark"] strong {
+    color: #c8d0dc !important;
+}
+
+/* Cards / containers com fundo branco */
+[data-theme="dark"] .container,
+[data-theme="dark"] .welcome-card {
+    background: #1e2128 !important;
+    color: #e2e4e9 !important;
+    border-color: rgba(255,255,255,0.08) !important;
+}
+
+/* Inputs e selects com estilo inline */
+[data-theme="dark"] input:not([type="file"]),
+[data-theme="dark"] select,
+[data-theme="dark"] textarea {
+    background: #252930 !important;
+    color: #e2e4e9 !important;
+    border-color: rgba(255,255,255,0.15) !important;
+}
+
+/* Fundo cinza claro (#f8f9fa, #f9f9f9 etc.) */
+[data-theme="dark"] [style*="background-color: #f8f9fa"],
+[data-theme="dark"] [style*="background: #f8f9fa"],
+[data-theme="dark"] [style*="background-color: #f9f9fa"],
+[data-theme="dark"] [style*="background:#f8f9fa"] {
+    background: #252930 !important;
+    border-color: rgba(255,255,255,0.1) !important;
+}
+
+/* Botão Sair na nav */
+[data-theme="dark"] .nav-link[style*="#d9534f"] {
+    background: #2a1a1a !important;
+    border-color: #d9534f !important;
+}
+
+/* Texto vermelho/muted que some no dark */
+[data-theme="dark"] [style*="color: #6c757d"],
+[data-theme="dark"] [style*="color: #6b7280"],
+[data-theme="dark"] [style*="color: #555"],
+[data-theme="dark"] [style*="color: #444"],
+[data-theme="dark"] [style*="color: #333"],
+[data-theme="dark"] [style*="color: #2c3e50"],
+[data-theme="dark"] [style*="color: #1e3d5e"],
+[data-theme="dark"] [style*="color: #495057"] {
+    color: #9aa8b8 !important;
+}
+
+/* Tabs de cadastro/edição */
+[data-theme="dark"] .tab-btn {
+    color: #6b7280 !important;
+}
+[data-theme="dark"] .tab-btn.tab-ativo {
+    color: #f0c070 !important;
+    border-bottom-color: #f0c070 !important;
+}
+
+/* Modal galeria */
+[data-theme="dark"] [style*="background: white"],
+[data-theme="dark"] [style*="background:white"],
+[data-theme="dark"] [style*="background-color: white"],
+[data-theme="dark"] [style*="background-color: #fff"],
+[data-theme="dark"] [style*="background: #fff"] {
+    background: #1e2128 !important;
+}
+
+/* Lista de obras */
+[data-theme="dark"] [style*="background: #e9ecef"] {
+    background: #252930 !important;
+    color: #9aa8b8 !important;
+}
+
 .dropdown-item-icon {
     width: 32px;
     height: 32px;
     border-radius: 7px;
-    background: #e8f1fb;
+    background: var(--dropdown-icon-bg);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -196,7 +311,7 @@ nav {
 
 .dropdown-divider {
     height: 1px;
-    background: #eaf0f8;
+    background: var(--dropdown-divider);
     margin: 4px 0;
 }
 
@@ -222,7 +337,24 @@ nav {
     border: 2px solid rgba(255,255,255,0.3);
 }
 
-/* ── CONTENT PLACEHOLDER ── */
+/* Botão de tema */
+.btn-tema {
+    background: rgba(255,255,255,0.15);
+    border: none;
+    border-radius: 6px;
+    color: var(--white);
+    cursor: pointer;
+    font-size: 16px;
+    padding: 6px 10px;
+    transition: background 0.2s;
+    line-height: 1;
+}
+
+.btn-tema:hover {
+    background: rgba(255,255,255,0.28);
+}
+
+/* ── CONTENT ── */
 .page-content {
     max-width: 1200px;
     margin: 48px auto;
@@ -230,7 +362,7 @@ nav {
 }
 
 .welcome-card {
-    background: var(--white);
+    background: var(--welcome-card-bg);
     border-radius: 14px;
     padding: 40px 48px;
     box-shadow: 0 2px 16px rgba(69,137,200,0.10);
@@ -240,13 +372,13 @@ nav {
 .welcome-card h1 {
     font-size: 28px;
     font-weight: 700;
-    color: #1e3d5e;
+    color: var(--welcome-title);
     margin-bottom: 12px;
 }
 
 .welcome-card p {
     font-size: 16px;
-    color: #6b8aaa;
+    color: var(--welcome-text);
     line-height: 1.6;
 }
 
@@ -262,14 +394,15 @@ nav {
     font-weight: 700;
     margin-bottom: 20px;
 }
-/* CSS do Spinner de Carregamento */
+
+/* Spinner */
 .spinner-loading {
-    display: none; /* Fica invisível por padrão */
+    display: none;
     width: 20px;
     height: 20px;
     border: 3px solid rgba(255, 255, 255, 0.3);
     border-radius: 50%;
-    border-top-color: #ffffff; /* Cor da parte giratória */
+    border-top-color: #ffffff;
     animation: girar 1s ease-in-out infinite;
     margin-left: 10px;
 }
@@ -278,21 +411,16 @@ nav {
     to { transform: rotate(360deg); }
 }
 
-/* O HTMX adiciona a classe 'htmx-request' quando a requisição começa */
-/* Nós usamos isso para mostrar o spinner e mudar o visual do botão */
-
-.htmx-request .spinner-loading, 
+.htmx-request .spinner-loading,
 .htmx-request.spinner-loading {
-    display: inline-block; /* Mostra o spinner */
+    display: inline-block;
 }
 
-/* Opcional: Escurece um pouco o botão e desativa cliques duplos visualmente */
 .htmx-request {
     opacity: 0.7;
     pointer-events: none;
 }
 
-/* Overlay de carregamento para a foto da galeria (lista de obras) */
 .spinner-overlay {
     display: none;
     position: absolute;

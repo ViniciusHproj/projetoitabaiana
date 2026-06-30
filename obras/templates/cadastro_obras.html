@@ -2,21 +2,21 @@
   {% include 'partial_messages.html' %}
 
   <div class="wrap">
-    <div class="header">
-      <div class="header-icon">
-        <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-          <rect x="2" y="10" width="14" height="6" rx="1" fill="#854F0B" />
-          <rect x="5" y="5" width="8" height="6" rx="1" fill="#854F0B" opacity=".6" />
-          <rect x="8" y="2" width="2" height="4" rx="1" fill="#854F0B" opacity=".4" />
-        </svg>
-      </div>
-      <div>
-        <div class="header-title">Cadastro de Obras</div>
-        <div class="header-sub">Preencha os dados da obra a registrar</div>
-      </div>
-    </div>
-
     <div class="card">
+      <div class="header">
+        <div class="header-icon">
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+            <rect x="2" y="10" width="14" height="6" rx="1" fill="#854F0B" />
+            <rect x="5" y="5" width="8" height="6" rx="1" fill="#854F0B" opacity=".6" />
+            <rect x="8" y="2" width="2" height="4" rx="1" fill="#854F0B" opacity=".4" />
+          </svg>
+        </div>
+        <div>
+          <div class="header-title">Cadastro de Obras</div>
+          <div class="header-sub">Preencha os dados da obra a registrar</div>
+        </div>
+      </div>
+      <div class="divider" style="margin-top: 0;"></div>
       <form hx-post="{% url 'Cadastro-Obras' %}"
             hx-target="#conteudo-dinamico"
             hx-encoding="multipart/form-data"
@@ -130,19 +130,7 @@
 
         <div class="btn-row">
           <button type="button" class="btn-ghost" onclick="limparForm()">Limpar</button>
-          <button type="submit" id="btn-salvar" name="btn-salvar" class="seu-css-do-botao" style="padding: 12px 24px !important; 
-                   background-color: #007bff !important; 
-                   color: white !important; 
-                   border: none !important; 
-                   border-radius: 6px !important; 
-                   cursor: pointer !important; 
-                   font-weight: 600 !important; 
-                   font-size: 16px !important;
-                   display: inline-flex !important; 
-                   align-items: center !important; 
-                   justify-content: center !important; 
-                   gap: 10px !important;
-                   transition: background-color 0.2s;">
+          <button type="submit" id="btn-salvar" name="btn-salvar" class="btn-primary">
             <span class="texto-botao">Salvar Obra</span>
             <div class="spinner-loading"></div>
           </button>

@@ -106,6 +106,17 @@ def data_e_valida(data_str, tipo="geral"):
         return False
 
 def login_view(request):
+    # Só mostra o aviso de ?aviso= na carga inicial (GET). O <form> desta página
+    # reenvia para request.get_full_path(), que inclui essa mesma query string —
+    # se checássemos isso também no POST, a mensagem seria recriada a cada
+    # tentativa de login e duplicaria com a de sucesso/erro do POST.
+    if request.method == 'GET':
+        aviso = request.GET.get('aviso', '')
+        if aviso == 'inatividade':
+            messages.warning(request, "⏱️ Sua sessão foi encerrada automaticamente por inatividade. Faça login novamente.")
+        elif aviso == 'saiu':
+            messages.info(request, "👋 Deslogando do sistema... Até logo!")
+
     if request.method == 'POST':
         usuario_cpf = request.POST.get('username', '').replace('.', '').replace('-', '')
         senha_digitada = request.POST.get('password', '')
@@ -137,13 +148,12 @@ def login_view(request):
 
     return render(request, 'login.html')
 def logout_view(request):
+    motivo = request.GET.get('motivo', '')
     if request.user.is_authenticated:
-        if request.GET.get('motivo') == 'inatividade':
-            messages.warning(request, "⏱️ Sua sessão foi encerrada automaticamente por inatividade. Faça login novamente.")
-        else:
-            messages.info(request, "👋 Deslogando do sistema... Até logo!")
         auth_logout(request)
-    return redirect('login')
+    if motivo == 'inatividade':
+        return redirect(f"/login/?aviso=inatividade")
+    return redirect(f"/login/?aviso=saiu")
 
 def staff_required(view_func):
     @wraps(view_func)
@@ -357,10 +367,16 @@ def salva_edicao_funcionario(request):
         # ==========================================
         if not data_e_valida(data_input, tipo="nascimento"):
             messages.warning(request, "⚠️ A data de nascimento informada é inválida ou irreal.")
-            
+            contexto_erro = {'funcionario': {
+                'CPF': request.POST.get('CPF_ORIGINAL', ''),
+                'NOME': request.POST.get('NOME', ''),
+                'DATA_NASCIMENTO': data_input,
+                'RG': request.POST.get('RG', ''),
+                'FUNCAO': request.POST.get('FUNCAO', ''),
+            }}
             if request.headers.get('HX-Request'):
-                return render(request, 'busca_atualiza_funcionario.html')
-            return render(request, 'index.html', {'template_meio': 'busca_atualiza_funcionario.html'})
+                return render(request, 'edita_funcionario.html', contexto_erro)
+            return render(request, 'index.html', {'template_meio': 'edita_funcionario.html', **contexto_erro})
         # ==========================================
 
         # 3. Formata a data para o padrão BR (DD/MM/AAAA)
@@ -432,62 +448,55 @@ def cadastro_obras(request):
         return redirect(f'/login/?next={request.path}')
 
     if request.method == 'POST' and 'btn-salvar' in request.POST:
+        # Coleta fora do try para que erros de validação nunca sejam engolidos pelo except externo
+        id_obra_manual = request.POST.get('ID_OBRA_MANUAL', '').strip()
+        tipo_obra = request.POST.get('TIPO_OBRA', '').strip().upper()
+        situacao = request.POST.get('SITUACAO', '').strip()
+        tipo_execucao = request.POST.get('TIPO_EXECUCAO', '').strip()
+        valor_obra = request.POST.get('VALOR_OBRA', '').strip()
+        data_inicio = request.POST.get('DATA_INICIO', '').strip()
+        conclusao_prevista = request.POST.get('CONCLUSAO_PREVISTA', '').strip()
+        data_finalizacao = request.POST.get('DATA_FINALIZACAO', '').strip()
+        nome_empresa = request.POST.get('NOME_EMPRESA', '').strip()
+        endereco = request.POST.get('ENDERECO', '').strip()
+        cnpj_empresa = request.POST.get('CNPJ_EMPRESA', '').strip()
+        fotos_arquivos = request.FILES.getlist('FOTO_OBRA')
+
+        # ==========================================
+        # VALIDAÇÕES (fora do try — nunca engolidas pelo except)
+        # ==========================================
+        campos_obrigatorios = [
+            tipo_obra, situacao, valor_obra, data_inicio,
+            conclusao_prevista, nome_empresa, cnpj_empresa,
+            tipo_execucao, endereco
+        ]
+        def _render_cadastro(msg):
+            messages.warning(request, msg)
+            if request.headers.get('HX-Request'):
+                return render(request, 'cadastro_obras.html', {'dados': request.POST})
+            return render(request, 'index.html', {'template_meio': 'cadastro_obras.html', 'dados': request.POST})
+
+        if any(not campo for campo in campos_obrigatorios) or not fotos_arquivos:
+            return _render_cadastro("⚠️ Preencha todos os campos obrigatórios e envie pelo menos uma foto da obra.")
+
+        if not data_e_valida(data_inicio, tipo="obra") or not data_e_valida(conclusao_prevista, tipo="obra"):
+            return _render_cadastro("⚠️ A Data de Início ou a Conclusão Prevista contém um ano inválido ou irreal.")
+
+        if data_finalizacao and not data_e_valida(data_finalizacao, tipo="obra"):
+            return _render_cadastro("⚠️ A Data de Finalização informada é inválida ou irreal.")
+
+        dt_inicio = datetime.strptime(data_inicio, '%Y-%m-%d').date()
+        dt_conclusao = datetime.strptime(conclusao_prevista, '%Y-%m-%d').date()
+
+        if dt_inicio >= dt_conclusao:
+            return _render_cadastro("⚠️ A Conclusão Prevista deve ser posterior à Data de Início.")
+
+        if data_finalizacao:
+            dt_finalizacao = datetime.strptime(data_finalizacao, '%Y-%m-%d').date()
+            if dt_inicio >= dt_finalizacao:
+                return _render_cadastro("⚠️ A Data de Finalização deve ser posterior à Data de Início.")
+
         try:
-            # 1. COLETA E LIMPEZA DOS DADOS DO FORMULÁRIO
-            id_obra_manual = request.POST.get('ID_OBRA_MANUAL', '').strip()
-            
-            # Mantemos o TIPO_OBRA em maiúsculo se esse for o padrão da sua planilha legada
-            tipo_obra = request.POST.get('TIPO_OBRA', '').strip().upper() 
-            
-            # SITUACAO e TIPO_EXECUCAO agora vêm com acento e minúsculas do HTML
-            situacao = request.POST.get('SITUACAO', '').strip()
-            tipo_execucao = request.POST.get('TIPO_EXECUCAO', '').strip()
-            
-            valor_obra = request.POST.get('VALOR_OBRA', '').strip()
-            data_inicio = request.POST.get('DATA_INICIO', '').strip()
-            conclusao_prevista = request.POST.get('CONCLUSAO_PREVISTA', '').strip()
-            data_finalizacao = request.POST.get('DATA_FINALIZACAO', '').strip()
-            
-            # Empresa e Endereço: removi o .upper() para ficar mais amigável, 
-            # mas você pode manter se a planilha exigir maiúsculas.
-            nome_empresa = request.POST.get('NOME_EMPRESA', '').strip()
-            endereco = request.POST.get('ENDERECO', '').strip()
-            
-            cnpj_empresa = request.POST.get('CNPJ_EMPRESA', '').strip()
-            fotos_arquivos = request.FILES.getlist('FOTO_OBRA')
-
-            # ==========================================
-            # 2. TRAVA DE SEGURANÇA (Campos Vazios)
-            # ==========================================
-            campos_obrigatorios = [
-                tipo_obra, situacao, valor_obra, data_inicio, 
-                conclusao_prevista, nome_empresa, cnpj_empresa, 
-                tipo_execucao, endereco
-            ]
-
-            if any(not campo for campo in campos_obrigatorios) or not fotos_arquivos:
-                messages.warning(request, "⚠️ Preencha todos os campos obrigatórios e envie pelo menos uma foto da obra.")
-                return render(request, 'cadastro_obras.html', {'dados': request.POST})
-
-            # ==========================================
-            # 2.5/2.6 TRAVAS DE SEGURANÇA (Datas e Cronologia)
-            # ==========================================
-            if not data_e_valida(data_inicio, tipo="obra") or not data_e_valida(conclusao_prevista, tipo="obra"):
-                messages.warning(request, "⚠️ A Data de Início ou a Conclusão Prevista contém um ano inválido ou irreal.")
-                return render(request, 'cadastro_obras.html', {'dados': request.POST})
-            
-            if data_finalizacao and not data_e_valida(data_finalizacao, tipo="obra"):
-                messages.warning(request, "⚠️ A Data de Finalização informada é inválida ou irreal.")
-                return render(request, 'cadastro_obras.html', {'dados': request.POST})
-
-            if data_inicio > conclusao_prevista:
-                messages.warning(request, "⚠️ A Data de Início não pode ser maior que a Conclusão Prevista.")
-                return render(request, 'cadastro_obras.html', {'dados': request.POST})
-
-            if data_finalizacao and data_inicio > data_finalizacao:
-                messages.warning(request, "⚠️ A Data de Início não pode ser maior que a Data de Finalização.")
-                return render(request, 'cadastro_obras.html', {'dados': request.POST})
-            
             # 4. UPLOAD MÚLTIPLO (Cloudinary)
             colecao = colecao_obras
             urls_galeria = []
@@ -636,40 +645,56 @@ def busca_atualiza_obra(request):
 
 def salva_edicao_obra(request):
     if request.method == 'POST':
+        # Coleta fora do try para que erros de validação nunca sejam engolidos pelo except externo
+        id_obra = request.POST.get('ID_OBRA', '').strip()
+        tipo_obra = request.POST.get('TIPO_OBRA', '').strip()
+        situacao = request.POST.get('SITUACAO', '').strip()
+        valor_obra = request.POST.get('VALOR_OBRA', '').strip()
+        data_inicio = request.POST.get('DATA_INICIO', '').strip()
+        conclusao_prevista = request.POST.get('CONCLUSAO_PREVISTA', '').strip()
+        data_finalizacao = request.POST.get('DATA_FINALIZACAO', '').strip()
+        nome_empresa = request.POST.get('NOME_EMPRESA', '').strip()
+        cnpj_empresa = request.POST.get('CNPJ_EMPRESA', '').strip()
+        tipo_execucao = request.POST.get('TIPO_EXECUCAO', '').strip()
+        endereco = request.POST.get('ENDERECO', '').strip()
+        fotos_novas_arquivos = request.FILES.getlist('FOTO_OBRA')
+
+        # ==========================================
+        # VALIDAÇÕES (fora do try — nunca engolidas pelo except)
+        # ==========================================
+        campos_obrigatorios = [
+            id_obra, tipo_obra, situacao, valor_obra, data_inicio,
+            conclusao_prevista, nome_empresa, cnpj_empresa,
+            tipo_execucao, endereco
+        ]
+        def _render_edicao(msg):
+            messages.warning(request, msg)
+            ctx = {'obra': request.POST}
+            if request.headers.get('HX-Request'):
+                return render(request, 'edita_obra.html', ctx)
+            return render(request, 'index.html', {'template_meio': 'edita_obra.html', **ctx})
+
+        if any(not campo for campo in campos_obrigatorios):
+            return _render_edicao("⚠️ Preencha todos os campos obrigatórios antes de salvar.")
+
+        if not data_e_valida(data_inicio, tipo="obra") or not data_e_valida(conclusao_prevista, tipo="obra"):
+            return _render_edicao("⚠️ A Data de Início ou a Conclusão Prevista contém um ano inválido ou irreal.")
+
+        if data_finalizacao and not data_e_valida(data_finalizacao, tipo="obra"):
+            return _render_edicao("⚠️ A Data de Finalização informada é inválida ou irreal.")
+
+        dt_inicio = datetime.strptime(data_inicio, '%Y-%m-%d').date()
+        dt_conclusao = datetime.strptime(conclusao_prevista, '%Y-%m-%d').date()
+
+        if dt_inicio >= dt_conclusao:
+            return _render_edicao("⚠️ A Conclusão Prevista deve ser posterior à Data de Início.")
+
+        if data_finalizacao:
+            dt_finalizacao = datetime.strptime(data_finalizacao, '%Y-%m-%d').date()
+            if dt_inicio >= dt_finalizacao:
+                return _render_edicao("⚠️ A Data de Finalização deve ser posterior à Data de Início.")
+
         try:
-            # 1. COLETA E LIMPEZA DOS DADOS DO FORMULÁRIO
-            id_obra = request.POST.get('ID_OBRA', '').strip()
-            tipo_obra = request.POST.get('TIPO_OBRA', '').strip()
-            situacao = request.POST.get('SITUACAO', '').strip()
-            valor_obra = request.POST.get('VALOR_OBRA', '').strip()
-            data_inicio = request.POST.get('DATA_INICIO', '').strip()
-            conclusao_prevista = request.POST.get('CONCLUSAO_PREVISTA', '').strip()
-            data_finalizacao = request.POST.get('DATA_FINALIZACAO', '').strip()
-            nome_empresa = request.POST.get('NOME_EMPRESA', '').strip()
-            cnpj_empresa = request.POST.get('CNPJ_EMPRESA', '').strip()
-            tipo_execucao = request.POST.get('TIPO_EXECUCAO', '').strip()
-            endereco = request.POST.get('ENDERECO', '').strip()
-
-            # --- MODIFICADO: Pega a lista de NOVAS fotos enviadas ---
-            fotos_novas_arquivos = request.FILES.getlist('FOTO_OBRA')
-
-            # ==========================================
-            # 2. TRAVAS DE SEGURANÇA (Campos e Datas)
-            # ==========================================
-            campos_obrigatorios = [
-                id_obra, tipo_obra, situacao, valor_obra, data_inicio,
-                conclusao_prevista, nome_empresa, cnpj_empresa,
-                tipo_execucao, endereco
-            ]
-
-            if any(not campo for campo in campos_obrigatorios):
-                messages.warning(request, "⚠️ Preencha todos os campos obrigatórios antes de salvar.")
-                return render(request, 'busca_atualiza_obra.html') if request.headers.get('HX-Request') else render(request, 'index.html', {'template_meio': 'busca_atualiza_obra.html'})
-
-            if not data_e_valida(data_inicio, tipo="obra") or not data_e_valida(conclusao_prevista, tipo="obra"):
-                messages.warning(request, "⚠️ Datas de Início ou Previsão inválidas.")
-                return render(request, 'busca_atualiza_obra.html') if request.headers.get('HX-Request') else render(request, 'index.html', {'template_meio': 'busca_atualiza_obra.html'})
-
             # 3. FUNÇÃO INTERNA DE FORMATAÇÃO
             def formatar_para_db(data_str):
                 if not data_str or data_str == '—': return '—'
