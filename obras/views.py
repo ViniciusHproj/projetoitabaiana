@@ -57,6 +57,11 @@ colecao_obras = _db['Banco_Obras']
 colecao_funcionarios = _db['Banco_funcionarios']
 colecao_timelapse = _db['Banco_Timelapse']
 colecao_seguranca_login = _db['Banco_SegurancaLogin']
+# Guarda, por usuário, qual é a sessão (session_key) considerada "ativa" no
+# momento — atualizada a cada login bem-sucedido. Usada pelo
+# SessaoUnicaMiddleware pra derrubar sessões antigas quando um login novo
+# acontece em outro dispositivo/navegador (ver obras/middleware.py).
+colecao_sessoes_ativas = _db['Banco_SessoesAtivas']
 
 try:
     # Garante (de forma idempotente) que dois cadastros nunca gravem o mesmo ID_OBRA,
@@ -375,6 +380,16 @@ def login_view(request):
             auth_login(request, user)
             _limpar_tentativas_login(chave_ip, chave_cpf)
 
+            # 2. Registra esta sessão como a "ativa" do usuário — qualquer
+            # outra sessão dele (outro dispositivo/navegador já logado) será
+            # derrubada na próxima requisição que fizer (ver SessaoUnicaMiddleware).
+            if not request.session.session_key:
+                request.session.save()
+            colecao_sessoes_ativas.update_one(
+                {'_id': user.pk},
+                {'$set': {'session_key': request.session.session_key, 'atualizado_em': datetime.utcnow()}},
+                upsert=True,
+            )
 
             system_messages = messages.get_messages(request)
             system_messages.used = True

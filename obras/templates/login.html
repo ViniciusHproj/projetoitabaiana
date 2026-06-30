@@ -30,7 +30,7 @@
             </div>
         {% endif %}
 
-        <form method="post" action="{{ request.get_full_path }}">
+        <form method="post" action="{{ request.get_full_path }}" id="form-login">
             {% csrf_token %}
             
             <div style="text-align: left; margin-bottom: 15px;">
@@ -47,10 +47,22 @@
                        style="width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 6px; box-sizing: border-box; font-size: 16px; outline-color: #007bff;">
             </div>
 
-            <button type="submit" style="width: 100%; padding: 14px; background: #007bff; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 16px; transition: 0.3s; box-shadow: 0 4px 6px rgba(0,123,255,0.2);">
-                Entrar no Sistema
+            <button type="submit" id="btn-login-submit" style="width: 100%; padding: 14px; background: #007bff; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 16px; transition: 0.3s; box-shadow: 0 4px 6px rgba(0,123,255,0.2); display: flex; align-items: center; justify-content: center; gap: 8px;">
+                <span class="texto-botao">Entrar no Sistema</span>
+                <div class="spinner-loading"></div>
             </button>
         </form>
+        <script>
+            // O login é um <form> comum (sem HTMX), então a classe .htmx-request
+            // não aparece sozinha como nos outros formulários do sistema — aqui
+            // adicionamos ela manualmente no botão pra reaproveitar o mesmo
+            // spinner/estado "desabilitado" via CSS já existente.
+            document.getElementById('form-login').addEventListener('submit', function () {
+                var botao = document.getElementById('btn-login-submit');
+                botao.classList.add('htmx-request');
+                botao.disabled = true;
+            });
+        </script>
 
         <a href="{% url 'inicio' %}" style="display: block; margin-top: 25px; color: #6c757d; text-decoration: none; font-size: 0.9em;">
             ← Voltar para o Início

@@ -1,5 +1,8 @@
 from django.conf import settings
 from django.contrib import messages
+from django.contrib.auth import logout as auth_logout
+from django.http import HttpResponse
+from django.shortcuts import redirect
 from django.urls import reverse
 
 
@@ -42,3 +45,51 @@ class SessaoExpiradaMiddleware:
             )
 
         return response
+
+
+class SessaoUnicaMiddleware:
+    """
+    Garante no máximo 1 sessão ativa por usuário ao mesmo tempo. login_view
+    registra, a cada login bem-sucedido, qual session_key é a "oficial" do
+    usuário (colecao_sessoes_ativas, ver obras/views.py). Aqui comparamos a
+    sessão da requisição atual com essa referência: se não baterem, é porque
+    um login mais novo aconteceu em outro dispositivo/navegador — então essa
+    sessão (mais antiga) é encerrada na hora, com aviso.
+    """
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        eh_rota_logout = request.path == reverse('logout')
+        eh_rota_login = request.path == reverse('login')
+
+        if request.user.is_authenticated and not eh_rota_logout and not eh_rota_login:
+            # Import local pra evitar qualquer risco de import circular na
+            # inicialização do Django (obras.views monta a conexão Mongo).
+            from obras.views import colecao_sessoes_ativas
+
+            sessao_atual = request.session.session_key
+            doc = colecao_sessoes_ativas.find_one({'_id': request.user.pk})
+
+            if doc and sessao_atual and doc.get('session_key') != sessao_atual:
+                auth_logout(request)
+                messages.warning(
+                    request,
+                    "Sua conta foi acessada em outro dispositivo. Esta sessão foi encerrada."
+                )
+
+                # A maioria das navegações no sistema é via HTMX (hx-get/hx-post),
+                # que intercepta um redirect normal e tentaria encaixar a página
+                # de login (que é uma página inteira, com nav/rodapé) dentro do
+                # fragmento já carregado — quebrando o layout e "escondendo" o
+                # aviso. HX-Redirect instrui o htmx a fazer uma navegação cheia
+                # do navegador em vez de tentar trocar só o fragmento.
+                if request.headers.get('HX-Request'):
+                    resposta = HttpResponse(status=200)
+                    resposta['HX-Redirect'] = reverse('login')
+                    return resposta
+
+                return redirect('login')
+
+        return self.get_response(request)
