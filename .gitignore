@@ -6,3 +6,14 @@ db.sqlite3
 staticfiles/
 .venv/
 venv/
+
+# Ferramentas de IA / editor — não fazem parte do projeto em si
+CLAUDE.md
+.claude/
+.vscode/
+.idea/
+*.code-workspace
+
+# Sistema operacional
+.DS_Store
+Thumbs.db
