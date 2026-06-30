@@ -345,6 +345,50 @@ def validar_cnpj(cnpj):
     return cnpj[-2:] == f"{digito_1}{digito_2}"
 
 
+def validar_rg(rg):
+    """RG não tem um algoritmo de dígito verificador padronizado entre
+    estados (diferente de CPF/CNPJ) — aqui só confirmamos que, depois de
+    limpo, sobrou algo plausível: só dígitos, com um tamanho razoável."""
+    return bool(rg) and rg.isdigit() and 5 <= len(rg) <= 12
+
+
+def valor_e_valido(valor_str):
+    """VALOR_OBRA chega do formulário já formatado em padrão BR (ex:
+    '1.234,56' ou '1234,56'). Confere que, removendo a formatação, sobra um
+    número positivo de verdade — não uma string qualquer."""
+    if not valor_str:
+        return False
+    limpo = valor_str.replace('.', '').replace(',', '.')
+    try:
+        return float(limpo) > 0
+    except ValueError:
+        return False
+
+
+def texto_tem_letra(texto):
+    """Confere que o texto tem pelo menos uma letra — evita salvar campos
+    como Nome/Endereço/Empresa preenchidos só com números ou símbolos."""
+    return bool(texto) and any(c.isalpha() for c in texto)
+
+
+SITUACOES_VALIDAS = {
+    "Finalizada por conclusão de construção",
+    "Finalizada por distrato",
+    "Em andamento",
+    "Paralisada",
+    "Cancelada",
+    "Em licitação",
+}
+
+TIPOS_EXECUCAO_VALIDOS = {
+    "Nova Construção",
+    "Reforma",
+    "Ampliação",
+    "Manutenção",
+    "Restauração",
+}
+
+
 def login_view(request):
     # Só mostra o aviso de ?aviso= na carga inicial (GET). O <form> desta página
     # reenvia para request.get_full_path(), que inclui essa mesma query string —
@@ -516,6 +560,16 @@ def cadastro_funcionario(request):
             # ==========================================
             if not validar_cpf(documento_funcionario['CPF']):
                 return _render_cadastro_func("O CPF informado é inválido.")
+            # ==========================================
+
+            # ==========================================
+            # 2.7 TRAVA DE SEGURANÇA DO RG E DO NOME
+            # ==========================================
+            if not validar_rg(documento_funcionario['RG']):
+                return _render_cadastro_func("O RG informado é inválido (deve conter apenas números).")
+
+            if not texto_tem_letra(documento_funcionario['NOME']):
+                return _render_cadastro_func("O Nome informado é inválido.")
             # ==========================================
 
             # 3. VERIFICAÇÃO DE DUPLICIDADE (Evita crash no Django)
@@ -696,6 +750,20 @@ def salva_edicao_funcionario(request):
             return redirect('salva_edicao_funcionario')
         # ==========================================
 
+        # ==========================================
+        # 2.6 TRAVA DE SEGURANÇA DO RG E DO NOME
+        # ==========================================
+        if not validar_rg(rg_novo.replace('.', '').replace('-', '')):
+            messages.warning(request, "O RG informado é inválido (deve conter apenas números).")
+            request.session['erro_edicao_funcionario'] = _dados_para_repor(request)
+            return redirect('salva_edicao_funcionario')
+
+        if not texto_tem_letra(nome_novo):
+            messages.warning(request, "O Nome informado é inválido.")
+            request.session['erro_edicao_funcionario'] = _dados_para_repor(request)
+            return redirect('salva_edicao_funcionario')
+        # ==========================================
+
         # Só trava contra duplo submit agora que passamos por todas as validações.
         _marcar_form_em_processamento(request, 'salva_edicao_funcionario')
 
@@ -812,6 +880,21 @@ def cadastro_obras(request):
 
         if not validar_cnpj(cnpj_empresa.replace('.', '').replace('/', '').replace('-', '')):
             return _render_cadastro("O CNPJ informado é inválido.")
+
+        if not valor_e_valido(valor_obra):
+            return _render_cadastro("O Valor Total da Obra informado é inválido.")
+
+        if situacao not in SITUACOES_VALIDAS:
+            return _render_cadastro("A Situação selecionada é inválida.")
+
+        if tipo_execucao not in TIPOS_EXECUCAO_VALIDOS:
+            return _render_cadastro("O Tipo de Execução selecionado é inválido.")
+
+        if id_obra_manual and not id_obra_manual.isdigit():
+            return _render_cadastro("O ID da Obra (quando informado manualmente) deve conter apenas números.")
+
+        if not texto_tem_letra(tipo_obra) or not texto_tem_letra(nome_empresa) or not texto_tem_letra(endereco):
+            return _render_cadastro("Tipo de Obra, Nome da Empresa e Endereço não podem conter apenas números ou símbolos.")
 
         if not data_e_valida(data_inicio, tipo="obra") or not data_e_valida(conclusao_prevista, tipo="obra"):
             return _render_cadastro("A Data de Início ou a Conclusão Prevista contém um ano inválido ou irreal.")
@@ -1021,6 +1104,18 @@ def salva_edicao_obra(request):
 
         if not validar_cnpj(cnpj_empresa.replace('.', '').replace('/', '').replace('-', '')):
             return _render_edicao("O CNPJ informado é inválido.")
+
+        if not valor_e_valido(valor_obra):
+            return _render_edicao("O Valor Total da Obra informado é inválido.")
+
+        if situacao not in SITUACOES_VALIDAS:
+            return _render_edicao("A Situação selecionada é inválida.")
+
+        if tipo_execucao not in TIPOS_EXECUCAO_VALIDOS:
+            return _render_edicao("O Tipo de Execução selecionado é inválido.")
+
+        if not texto_tem_letra(tipo_obra) or not texto_tem_letra(nome_empresa) or not texto_tem_letra(endereco):
+            return _render_edicao("Tipo de Obra, Nome da Empresa e Endereço não podem conter apenas números ou símbolos.")
 
         if not data_e_valida(data_inicio, tipo="obra") or not data_e_valida(conclusao_prevista, tipo="obra"):
             return _render_edicao("A Data de Início ou a Conclusão Prevista contém um ano inválido ou irreal.")
