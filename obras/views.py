@@ -114,8 +114,10 @@ def login_view(request):
         aviso = request.GET.get('aviso', '')
         if aviso == 'inatividade':
             messages.warning(request, "Sua sessão foi encerrada automaticamente por inatividade. Faça login novamente.")
+            return redirect('login')
         elif aviso == 'saiu':
             messages.info(request, "Sessão encerrada com sucesso.")
+            return redirect('login')
 
     if request.method == 'POST':
         usuario_cpf = request.POST.get('username', '').replace('.', '').replace('-', '')
