@@ -38,6 +38,104 @@ def _disparar_em_background(funcao, *args, **kwargs):
     threading.Thread(target=_executar, daemon=True).start()
 
 
+LOGIN_MAX_TENTATIVAS = 5
+LOGIN_JANELA_BLOQUEIO_SEGUNDOS = 15 * 60  # 15 minutos
+
+
+def _ip_do_cliente(request):
+    """Pega o IP real do request. Em produção (Render) o tráfego passa por um
+    proxy reverso, que define X-Forwarded-For — sem isso, REMOTE_ADDR seria
+    sempre o IP do proxy, não do usuário, e o rate limit nunca bloquearia ninguém."""
+    encaminhado = request.META.get('HTTP_X_FORWARDED_FOR')
+    if encaminhado:
+        return encaminhado.split(',')[0].strip()
+    return request.META.get('REMOTE_ADDR', 'desconhecido')
+
+
+def _chaves_rate_limit_login(request, cpf):
+    """Duas chaves: uma por IP (limita um único computador tentando várias
+    contas) e outra por CPF (limita várias máquinas/IPs diferentes atacando
+    a mesma conta — ex: ataque distribuído contra um único usuário)."""
+    chave_ip = f'login_tentativas_ip_{_ip_do_cliente(request)}'
+    chave_cpf = f'login_tentativas_cpf_{cpf}' if cpf else None
+    return chave_ip, chave_cpf
+
+
+def _formatar_tempo_restante(segundos):
+    minutos = max(1, round(segundos / 60))
+    return f"{minutos} minuto" if minutos == 1 else f"{minutos} minutos"
+
+
+def _ler_contador(chave):
+    """LocMemCache (cache padrão do projeto) não expõe TTL restante via API
+    pública — por isso guardamos (contagem, timestamp_de_expiração) explicitamente
+    em vez de só a contagem, para conseguir calcular quanto tempo falta."""
+    dado = cache.get(chave)
+    if not dado:
+        return 0, 0
+    contagem, expira_em = dado
+    restante = expira_em - datetime.now().timestamp()
+    if restante <= 0:
+        return 0, 0
+    return contagem, restante
+
+
+def _login_esta_bloqueado(chave_ip, chave_cpf):
+    """Retorna (bloqueado, segundos_restantes). Quando ambas as chaves estão
+    bloqueadas, usa o maior tempo restante para informar ao usuário."""
+    maior_restante = 0
+
+    contagem_ip, restante_ip = _ler_contador(chave_ip)
+    if contagem_ip >= LOGIN_MAX_TENTATIVAS:
+        maior_restante = max(maior_restante, restante_ip)
+
+    if chave_cpf:
+        contagem_cpf, restante_cpf = _ler_contador(chave_cpf)
+        if contagem_cpf >= LOGIN_MAX_TENTATIVAS:
+            maior_restante = max(maior_restante, restante_cpf)
+
+    if maior_restante > 0:
+        return True, maior_restante
+    return False, 0
+
+
+def _tentativas_restantes(chave_ip, chave_cpf):
+    """Quantas tentativas ainda restam antes do bloqueio — usa a chave mais
+    próxima do limite (a conta tentada ou o IP, o que estiver mais alto)."""
+    usadas_ip, _ = _ler_contador(chave_ip)
+    usadas_cpf, _ = _ler_contador(chave_cpf) if chave_cpf else (0, 0)
+    usadas = max(usadas_ip, usadas_cpf)
+    return max(0, LOGIN_MAX_TENTATIVAS - usadas)
+
+
+def _registrar_tentativa_falha(chave_ip, chave_cpf):
+    expira_em = datetime.now().timestamp() + LOGIN_JANELA_BLOQUEIO_SEGUNDOS
+    contagem_ip, _ = _ler_contador(chave_ip)
+    cache.set(chave_ip, (contagem_ip + 1, expira_em), LOGIN_JANELA_BLOQUEIO_SEGUNDOS)
+    if chave_cpf:
+        contagem_cpf, _ = _ler_contador(chave_cpf)
+        cache.set(chave_cpf, (contagem_cpf + 1, expira_em), LOGIN_JANELA_BLOQUEIO_SEGUNDOS)
+
+
+def _limpar_tentativas_login(chave_ip, chave_cpf):
+    cache.delete(chave_ip)
+    if chave_cpf:
+        cache.delete(chave_cpf)
+
+
+def _form_ja_em_processamento(request, nome_acao, segundos=4):
+    """Trava server-side contra duplo clique/duplo submit: o hx-indicator do
+    HTMX só desabilita o botão visualmente — não impede um segundo POST real
+    (ex: clique muito rápido, ou script automatizado). Usa o cache como lock
+    de curta duração por usuário+ação."""
+    identificador = request.user.pk if request.user.is_authenticated else _ip_do_cliente(request)
+    chave = f'form_lock_{nome_acao}_{identificador}'
+    if cache.get(chave):
+        return True
+    cache.set(chave, True, segundos)
+    return False
+
+
 CACHE_KEY_VERSAO_OBRAS = 'obras_cache_versao'
 
 
@@ -123,16 +221,24 @@ def login_view(request):
         usuario_cpf = request.POST.get('username', '').replace('.', '').replace('-', '')
         senha_digitada = request.POST.get('password', '')
 
+        chave_ip, chave_cpf = _chaves_rate_limit_login(request, usuario_cpf)
+        bloqueado, segundos_restantes = _login_esta_bloqueado(chave_ip, chave_cpf)
+        if bloqueado:
+            tempo = _formatar_tempo_restante(segundos_restantes)
+            messages.error(request, f"Muitas tentativas de login incorretas. Tente novamente em {tempo}.")
+            return render(request, 'login.html')
+
         user = authenticate(request, username=usuario_cpf, password=senha_digitada)
 
         if user is not None:
             # 1. Faz o login
             auth_login(request, user)
-            
-                        
+            _limpar_tentativas_login(chave_ip, chave_cpf)
+
+
             system_messages = messages.get_messages(request)
             system_messages.used = True
-            
+
             # 3. Agora sim, cria a mensagem única de boas-vindas
             nome_usuario = user.first_name.split()[0].title()
             funcao = "Supervisor" if user.is_staff else "Funcionário Comum"
@@ -141,11 +247,18 @@ def login_view(request):
             proxima_pagina = request.GET.get('next', 'inicio')
             return redirect(proxima_pagina)
         else:
+            _registrar_tentativa_falha(chave_ip, chave_cpf)
+            restantes = _tentativas_restantes(chave_ip, chave_cpf)
             # Se errar o login, também limpamos antes de mostrar o erro
             storage = get_messages(request)
             for _ in storage: pass
-            
-            messages.error(request, "CPF ou Senha incorretos. Tente novamente.")
+
+            if restantes > 0:
+                plural = "tentativa" if restantes == 1 else "tentativas"
+                messages.error(request, f"CPF ou Senha incorretos. Você tem mais {restantes} {plural} antes do bloqueio temporário.")
+            else:
+                tempo = _formatar_tempo_restante(LOGIN_JANELA_BLOQUEIO_SEGUNDOS)
+                messages.error(request, f"CPF ou Senha incorretos. Login bloqueado por {tempo} devido ao excesso de tentativas.")
             return render(request, 'login.html')
 
     return render(request, 'login.html')
@@ -195,6 +308,10 @@ def cadastro_funcionario(request):
         return redirect('inicio')
         
     if request.method == 'POST' and 'btn-salvar' in request.POST:
+        if _form_ja_em_processamento(request, 'cadastro_funcionario'):
+            messages.warning(request, "Sua solicitação já está sendo processada. Aguarde alguns segundos.")
+            return render(request, 'cadastro_funcionario.html', {'dados': request.POST})
+
         try:
             def formatar_data_br(data_str):
                 if not data_str:
@@ -342,6 +459,12 @@ def busca_atualiza_funcionario(request):
 
 def salva_edicao_funcionario(request):
     if request.method == 'POST':
+        if _form_ja_em_processamento(request, 'salva_edicao_funcionario'):
+            messages.warning(request, "Sua solicitação já está sendo processada. Aguarde alguns segundos.")
+            if request.headers.get('HX-Request'):
+                return render(request, 'busca_atualiza_funcionario.html')
+            return render(request, 'index.html', {'template_meio': 'busca_atualiza_funcionario.html'})
+
         cpf_original = request.POST.get('CPF_ORIGINAL')
         
         # 1. COLETA E LIMPEZA INICIAL DOS DADOS
@@ -450,6 +573,10 @@ def cadastro_obras(request):
         return redirect(f'/login/?next={request.path}')
 
     if request.method == 'POST' and 'btn-salvar' in request.POST:
+        if _form_ja_em_processamento(request, 'cadastro_obras'):
+            messages.warning(request, "Sua solicitação já está sendo processada. Aguarde alguns segundos.")
+            return render(request, 'cadastro_obras.html', {'dados': request.POST})
+
         # Coleta fora do try para que erros de validação nunca sejam engolidos pelo except externo
         id_obra_manual = request.POST.get('ID_OBRA_MANUAL', '').strip()
         tipo_obra = request.POST.get('TIPO_OBRA', '').strip().upper()
@@ -647,6 +774,10 @@ def busca_atualiza_obra(request):
 
 def salva_edicao_obra(request):
     if request.method == 'POST':
+        if _form_ja_em_processamento(request, 'salva_edicao_obra'):
+            messages.warning(request, "Sua solicitação já está sendo processada. Aguarde alguns segundos.")
+            return render(request, 'edita_obra.html', {'obra': request.POST}) if request.headers.get('HX-Request') else render(request, 'index.html', {'template_meio': 'edita_obra.html', 'obra': request.POST})
+
         # Coleta fora do try para que erros de validação nunca sejam engolidos pelo except externo
         id_obra = request.POST.get('ID_OBRA', '').strip()
         tipo_obra = request.POST.get('TIPO_OBRA', '').strip()
