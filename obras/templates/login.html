@@ -10,7 +10,6 @@
 
         {% if request.GET.next %}
             <div style="background-color: #fff3cd; color: #856404; padding: 15px; border-radius: 8px; font-size: 0.9em; margin-bottom: 25px; border: 1px solid #ffeeba; text-align: center; line-height: 1.5;">
-                <span style="font-size: 1.5em;">🔐</span><br>
                 {% if "cadastro-funcionario" in request.GET.next %}
                     Realize o login para acessar o <strong>Cadastro de Funcionários</strong>.
                 {% elif "atualizar-funcionario" in request.GET.next %}

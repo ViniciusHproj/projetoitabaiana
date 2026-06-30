@@ -50,6 +50,59 @@
         position: relative;
     }
 
+    .site-footer {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        width: 100%;
+        display: flex;
+        justify-content: center;
+        padding: 10px 0;
+        z-index: 999;
+        pointer-events: none;
+    }
+
+    .btn-tema-footer {
+        background: #e4e4e4 !important;
+        border: none;
+        cursor: pointer;
+        font-family: 'Nunito', sans-serif;
+        font-size: 12px;
+        font-weight: 600;
+        color: #1a1a1a !important;
+        padding: 6px 14px;
+        border-radius: 20px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+        transition: background 0.15s;
+        pointer-events: auto;
+    }
+
+    .btn-tema-footer:hover {
+        background: #d2d2d2 !important;
+    }
+
+    /* Espaço extra no fim do conteúdo para o botão fixo não tampar nada */
+    .page-content {
+        padding-bottom: 56px;
+    }
+
+    .nav-role-badge {
+        background: #3a3f47;
+        color: white;
+        font-size: 12px;
+        font-weight: 700;
+        padding: 5px 12px;
+        border-radius: 20px;
+        letter-spacing: .03em;
+        white-space: nowrap;
+    }
+
+    @media (max-width: 768px) {
+        .nav-role-badge {
+            margin-left: auto;
+        }
+    }
+
     /* ========================================== */
     /* ESTILOS DO MENU HAMBÚRGUER (BRANCO + ANIMAÇÃO) */
     /* ========================================== */
@@ -150,7 +203,11 @@
         </div>
         <span class="nav-logo-text">Gestão de Obras</span>
       </a>
-      
+
+      {% if user.is_authenticated %}
+      <span class="nav-role-badge">{% if user.is_staff or user.is_superuser %}Supervisor{% else %}Funcionário{% endif %}</span>
+      {% endif %}
+
       <button class="menu-hamburger-btn" onclick="toggleMenuPrincipal()">
         <div class="hamburger-icon" id="icon-referencia">
             <span></span>
@@ -201,9 +258,6 @@
               <button type="submit" class="nav-link" style="background: white; border: 1.5px solid #d9534f; border-radius: 6px; cursor: pointer; color: #d9534f !important; font-weight: bold; padding: 5px 14px;">Sair</button>
           </form>
         </li>
-        <li>
-          <button class="btn-tema" id="btn-tema" onclick="alternarTema()" title="Alternar tema claro/escuro">🌙</button>
-        </li>
 
         {% else %}
         <li>
@@ -217,6 +271,10 @@
   <main class="page-content" id="conteudo-dinamico">
     {% block content %}{% endblock %}
   </main>
+
+  <footer class="site-footer">
+    <button class="btn-tema-footer" id="btn-tema" onclick="alternarTema()">Modo Escuro</button>
+  </footer>
 
 <script>
     function toggleMenuPrincipal() {
@@ -321,7 +379,7 @@
     function atualizarIconeTema() {
         const escuro = document.documentElement.getAttribute('data-theme') === 'dark';
         const btn = document.getElementById('btn-tema');
-        if (btn) btn.textContent = escuro ? '☀️' : '🌙';
+        if (btn) btn.textContent = escuro ? 'Modo Claro' : 'Modo Escuro';
     }
 
     window.alternarTema = function() {

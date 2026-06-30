@@ -25,12 +25,12 @@
     --bg-body: #16181d;
     --dropdown-bg: #1e2128;
     --dropdown-text: #c0cce0;
-    --dropdown-label: #4a6a8a;
+    --dropdown-label: #ffffff;
     --dropdown-icon-bg: #1a2840;
     --dropdown-divider: #252d3a;
     --welcome-card-bg: #1e2128;
     --welcome-title: #c8d8ee;
-    --welcome-text: #7a94b0;
+    --welcome-text: #ffffff;
 }
 
 body {
@@ -214,7 +214,7 @@ nav {
 [data-theme="dark"] h4,
 [data-theme="dark"] p,
 [data-theme="dark"] label,
-[data-theme="dark"] span:not(.nav-logo-text):not(.texto-botao),
+[data-theme="dark"] span:not(.nav-logo-text):not(.texto-botao):not(.nav-role-badge),
 [data-theme="dark"] small,
 [data-theme="dark"] strong {
     color: #c8d0dc !important;
@@ -261,12 +261,12 @@ nav {
 [data-theme="dark"] [style*="color: #2c3e50"],
 [data-theme="dark"] [style*="color: #1e3d5e"],
 [data-theme="dark"] [style*="color: #495057"] {
-    color: #9aa8b8 !important;
+    color: #ffffff !important;
 }
 
 /* Tabs de cadastro/edição */
 [data-theme="dark"] .tab-btn {
-    color: #6b7280 !important;
+    color: #ffffff !important;
 }
 [data-theme="dark"] .tab-btn.tab-ativo {
     color: #f0c070 !important;
@@ -285,7 +285,7 @@ nav {
 /* Lista de obras */
 [data-theme="dark"] [style*="background: #e9ecef"] {
     background: #252930 !important;
-    color: #9aa8b8 !important;
+    color: #ffffff !important;
 }
 
 .dropdown-item-icon {

@@ -29,8 +29,8 @@
   --bg-card: #1e2128;
   --bg-input: #252930;
   --text-main: #e2e4e9;
-  --text-label: #9aa0ad;
-  --text-muted: #6b7280;
+  --text-label: #ffffff;
+  --text-muted: #ffffff;
   --border-card: rgba(255,255,255,0.08);
   --border-input: rgba(255,255,255,0.15);
   --border-input-focus: rgba(255,255,255,0.35);
@@ -38,7 +38,7 @@
   --btn-primary-bg: #3d2200;
   --btn-primary-color: #f0c070;
   --btn-ghost-border: rgba(255,255,255,0.18);
-  --btn-ghost-color: #9aa0ad;
+  --btn-ghost-color: #ffffff;
   --btn-ghost-hover: #252930;
   --obra-card-bg: #252930;
   --obra-valor-color: #f0c070;

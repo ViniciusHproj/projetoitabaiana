@@ -55,7 +55,7 @@
 
     [data-theme="dark"] .cartao-obra [style*="background: #e9ecef"] {
         background: #252930 !important;
-        color: #6b7280 !important;
+        color: #ffffff !important;
     }
 
     [data-theme="dark"] h2 {
@@ -98,11 +98,11 @@
                     </div>
                 </div>
                 <p style="text-align: center; font-size: 11px; color: #888; margin: 0 0 15px 0; font-style: italic;">
-                    👆 Clique na foto para ver a galeria
+                    Clique na foto para ver a galeria
                 </p>
             {% else %}
                 <div style="width: 100%; height: 200px; background: #e9ecef; display: flex; align-items: center; justify-content: center; border-radius: 6px; margin-bottom: 15px; color: #6c757d; font-weight: bold;">
-                    📷 Sem Foto
+                    Sem Foto
                 </div>
             {% endif %}
 
@@ -138,9 +138,9 @@
             <hr style="border: 0; border-top: 1px solid #eee; margin: 5px 0 10px 0;">
 
             <div style="background: #f8f9fa; padding: 10px; border-radius: 6px; margin-top: auto;">
-                <p style="margin: 3px 0; font-size: 12px; color: #555;">📅 <strong>Início:</strong> {{ obra.DATA_INICIO }}</p>
-                <p style="margin: 3px 0; font-size: 12px; color: #555;">⏳ <strong>Previsão:</strong> {{ obra.CONCLUSAO_PREVISTA }}</p>
-                <p style="margin: 3px 0; font-size: 12px; color: #555;">✅ <strong>Finalização:</strong> {{ obra.DATA_FINALIZACAO }}</p>
+                <p style="margin: 3px 0; font-size: 12px; color: #555;"><strong>Início:</strong> {{ obra.DATA_INICIO }}</p>
+                <p style="margin: 3px 0; font-size: 12px; color: #555;"><strong>Previsão:</strong> {{ obra.CONCLUSAO_PREVISTA }}</p>
+                <p style="margin: 3px 0; font-size: 12px; color: #555;"><strong>Finalização:</strong> {{ obra.DATA_FINALIZACAO }}</p>
             </div>
             
         </div>

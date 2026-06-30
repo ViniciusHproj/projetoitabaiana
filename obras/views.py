@@ -113,9 +113,9 @@ def login_view(request):
     if request.method == 'GET':
         aviso = request.GET.get('aviso', '')
         if aviso == 'inatividade':
-            messages.warning(request, "⏱️ Sua sessão foi encerrada automaticamente por inatividade. Faça login novamente.")
+            messages.warning(request, "Sua sessão foi encerrada automaticamente por inatividade. Faça login novamente.")
         elif aviso == 'saiu':
-            messages.info(request, "👋 Deslogando do sistema... Até logo!")
+            messages.info(request, "Sessão encerrada com sucesso.")
 
     if request.method == 'POST':
         usuario_cpf = request.POST.get('username', '').replace('.', '').replace('-', '')
@@ -134,7 +134,7 @@ def login_view(request):
             # 3. Agora sim, cria a mensagem única de boas-vindas
             nome_usuario = user.first_name.split()[0].title()
             funcao = "Supervisor" if user.is_staff else "Funcionário Comum"
-            messages.success(request, f"✅ Autenticado com sucesso! Bem-vindo, {nome_usuario} ({funcao}).")
+            messages.success(request, f"Autenticado com sucesso. Bem-vindo, {nome_usuario} ({funcao}).")
 
             proxima_pagina = request.GET.get('next', 'inicio')
             return redirect(proxima_pagina)
@@ -143,7 +143,7 @@ def login_view(request):
             storage = get_messages(request)
             for _ in storage: pass
             
-            messages.error(request, "⚠️ CPF ou Senha incorretos. Tente novamente.")
+            messages.error(request, "CPF ou Senha incorretos. Tente novamente.")
             return render(request, 'login.html')
 
     return render(request, 'login.html')
@@ -164,7 +164,7 @@ def staff_required(view_func):
         
         # 2. Se está logado MAS não é STAFF, manda pro início com ERRO
         if not request.user.is_staff:
-            messages.error(request, "🚫 Acesso não autorizado! Esta área é restrita a supervisores.")
+            messages.error(request, "Acesso não autorizado. Esta área é restrita a supervisores.")
             return redirect('inicio') # Redireciona para a rota do Dashboard
             
         return view_func(request, *args, **kwargs)
@@ -189,7 +189,7 @@ def cadastro_funcionario(request):
 
     # 2. Bloqueio para quem está logado mas é COMUM (não é staff)
     if not request.user.is_staff:
-        messages.error(request, "🚫 Acesso negado! Esta área é exclusiva para supervisores.")
+        messages.error(request, "Acesso negado. Esta área é exclusiva para supervisores.")
         return redirect('inicio')
         
     if request.method == 'POST' and 'btn-salvar' in request.POST:
@@ -222,7 +222,7 @@ def cadastro_funcionario(request):
             for campo in campos_obrigatorios:
                 valor = documento_funcionario.get(campo, '')
                 if not valor or str(valor).strip() == "" or valor == '—':
-                    messages.warning(request, "⚠️ Preencha todos os campos obrigatórios.")
+                    messages.warning(request, "Preencha todos os campos obrigatórios.")
                     return render(request, 'cadastro_funcionario.html', {'dados': request.POST})
 
             # ==========================================
@@ -232,14 +232,14 @@ def cadastro_funcionario(request):
             
             # Chama a função validadora que criamos no topo do views.py
             if not data_e_valida(data_nasc_str, tipo="nascimento"):
-                messages.warning(request, "⚠️ A data de nascimento informada é inválida ou irreal.")
+                messages.warning(request, "A data de nascimento informada é inválida ou irreal.")
                 return render(request, 'cadastro_funcionario.html', {'dados': request.POST})
             # ==========================================
 
             # 3. VERIFICAÇÃO DE DUPLICIDADE (Evita crash no Django)
             cpf = documento_funcionario['CPF']
             if User.objects.filter(username=cpf).exists():
-                messages.error(request, '⚠️ Erro: Já existe um funcionário cadastrado com este CPF.')
+                messages.error(request, 'Já existe um funcionário cadastrado com este CPF.')
                 return render(request, 'cadastro_funcionario.html', {'dados': request.POST})
 
             # 4. CÁLCULO DA IDADE (Agora é 100% seguro, pois a data foi validada acima)
@@ -270,12 +270,12 @@ def cadastro_funcionario(request):
             # 7. INSERÇÃO NO MONGODB
             colecao_funcionarios.insert_one(documento_funcionario)
 
-            messages.success(request, f"✅ Funcionário {nome} cadastrado com sucesso!")
+            messages.success(request, f"Funcionário {nome} cadastrado com sucesso.")
             return redirect('cadastro_funcionario')
 
         except Exception:
             logger.exception("Erro ao cadastrar funcionário")
-            messages.error(request, "⚠️ Erro inesperado ao cadastrar. Tente novamente.")
+            messages.error(request, "Erro inesperado ao cadastrar. Tente novamente.")
             return render(request, 'cadastro_funcionario.html', {'dados': request.POST})
 
     if request.headers.get('HX-Request'):
@@ -292,7 +292,7 @@ def busca_atualiza_funcionario(request):
 
     # 2. Bloqueio para quem está logado mas é COMUM (não é staff)
     if not request.user.is_staff:
-        messages.error(request, "🚫 Acesso negado! Esta área é exclusiva para supervisores.")
+        messages.error(request, "Acesso negado. Esta área é exclusiva para supervisores.")
         return redirect('inicio')
     # Lógica para o POST (Quando o usuário clica em "Buscar")
     if request.method == 'POST':
@@ -321,7 +321,7 @@ def busca_atualiza_funcionario(request):
             })
 
         else:
-            messages.error(request, "⚠️ Funcionário não encontrado.")
+            messages.error(request, "Funcionário não encontrado.")
             # Se for HTMX, volta para a tela de busca
             if request.headers.get('HX-Request'):
                 return render(request, 'busca_atualiza_funcionario.html')
@@ -354,7 +354,7 @@ def salva_edicao_funcionario(request):
         campos_obrigatorios = [nome_novo, funcao_nova, rg_novo, data_input]
         
         if any(not campo for campo in campos_obrigatorios):
-            messages.warning(request, "⚠️ Atenção: Não é permitido deixar Nome, RG, Função ou Data de Nascimento em branco.")
+            messages.warning(request, "Não é permitido deixar Nome, RG, Função ou Data de Nascimento em branco.")
             
             # Mantém o fluxo correto do seu HTMX caso dê erro
             if request.headers.get('HX-Request'):
@@ -366,7 +366,7 @@ def salva_edicao_funcionario(request):
         # 2.5 TRAVA DE SEGURANÇA DA DATA DE NASCIMENTO
         # ==========================================
         if not data_e_valida(data_input, tipo="nascimento"):
-            messages.warning(request, "⚠️ A data de nascimento informada é inválida ou irreal.")
+            messages.warning(request, "A data de nascimento informada é inválida ou irreal.")
             contexto_erro = {'funcionario': {
                 'CPF': request.POST.get('CPF_ORIGINAL', ''),
                 'NOME': request.POST.get('NOME', ''),
@@ -422,7 +422,7 @@ def salva_edicao_funcionario(request):
             usuario_django.save()
 
         except User.DoesNotExist:
-            messages.error(request, "⚠️ Erro: Usuário não encontrado na tabela de autenticação.")
+            messages.error(request, "Usuário não encontrado na tabela de autenticação.")
             if request.headers.get('HX-Request'):
                 return render(request, 'busca_atualiza_funcionario.html')
             return render(request, 'index.html', {'template_meio': 'busca_atualiza_funcionario.html'})
@@ -431,7 +431,7 @@ def salva_edicao_funcionario(request):
         # Nota: Não salvamos a senha no Mongo, conforme sua lógica anterior
         colecao_funcionarios.update_one({'CPF': cpf_original}, {'$set': dados_atualizados_mongo})
 
-        messages.success(request, f"✅ Dados de {nome_novo} atualizados com sucesso!")
+        messages.success(request, f"Dados de {nome_novo} atualizados com sucesso.")
         
     # Retorno adequado para HTMX ou acesso direto
     if request.headers.get('HX-Request'):
@@ -477,24 +477,24 @@ def cadastro_obras(request):
             return render(request, 'index.html', {'template_meio': 'cadastro_obras.html', 'dados': request.POST})
 
         if any(not campo for campo in campos_obrigatorios) or not fotos_arquivos:
-            return _render_cadastro("⚠️ Preencha todos os campos obrigatórios e envie pelo menos uma foto da obra.")
+            return _render_cadastro("Preencha todos os campos obrigatórios e envie pelo menos uma foto da obra.")
 
         if not data_e_valida(data_inicio, tipo="obra") or not data_e_valida(conclusao_prevista, tipo="obra"):
-            return _render_cadastro("⚠️ A Data de Início ou a Conclusão Prevista contém um ano inválido ou irreal.")
+            return _render_cadastro("A Data de Início ou a Conclusão Prevista contém um ano inválido ou irreal.")
 
         if data_finalizacao and not data_e_valida(data_finalizacao, tipo="obra"):
-            return _render_cadastro("⚠️ A Data de Finalização informada é inválida ou irreal.")
+            return _render_cadastro("A Data de Finalização informada é inválida ou irreal.")
 
         dt_inicio = datetime.strptime(data_inicio, '%Y-%m-%d').date()
         dt_conclusao = datetime.strptime(conclusao_prevista, '%Y-%m-%d').date()
 
         if dt_inicio >= dt_conclusao:
-            return _render_cadastro("⚠️ A Conclusão Prevista deve ser posterior à Data de Início.")
+            return _render_cadastro("A Conclusão Prevista deve ser posterior à Data de Início.")
 
         if data_finalizacao:
             dt_finalizacao = datetime.strptime(data_finalizacao, '%Y-%m-%d').date()
             if dt_inicio >= dt_finalizacao:
-                return _render_cadastro("⚠️ A Data de Finalização deve ser posterior à Data de Início.")
+                return _render_cadastro("A Data de Finalização deve ser posterior à Data de Início.")
 
         try:
             # 4. UPLOAD MÚLTIPLO (Cloudinary)
@@ -505,7 +505,7 @@ def cadastro_obras(request):
                     resultado_upload = cloudinary.uploader.upload(foto, folder="obras_projeto")
                     urls_galeria.append(resultado_upload.get('secure_url'))
             except Exception:
-                messages.error(request, "⚠️ Erro ao enviar as imagens para o servidor.")
+                messages.error(request, "Erro ao enviar as imagens para o servidor.")
                 return render(request, 'cadastro_obras.html', {'dados': request.POST})
 
             url_da_foto_capa = urls_galeria[0] if urls_galeria else ""
@@ -564,12 +564,12 @@ def cadastro_obras(request):
                     break
                 except DuplicateKeyError:
                     if id_obra_manual:
-                        messages.error(request, f"⚠️ O ID {id_obra_manual} já está cadastrado no Banco de Dados!")
+                        messages.error(request, f"O ID {id_obra_manual} já está cadastrado no banco de dados.")
                         return render(request, 'cadastro_obras.html', {'dados': request.POST})
                     continue  # outro cadastro pegou esse número primeiro: recalcula e tenta de novo
 
             if resultado is None:
-                messages.error(request, "⚠️ Não foi possível gerar um ID de obra único. Tente novamente.")
+                messages.error(request, "Não foi possível gerar um ID de obra único. Tente novamente.")
                 return redirect('Cadastro-Obras')
 
             # 7. HISTÓRICO (TIMELAPSE) — só agora que o ID final está confirmado
@@ -590,12 +590,12 @@ def cadastro_obras(request):
             if resultado.inserted_id:
                 _disparar_em_background(salvar_no_google_sheets, nova_obra)
                 _bump_cache_obras()
-                messages.success(request, f"✅ Obra {id_obra_gerado} salva com sucesso!")
+                messages.success(request, f"Obra {id_obra_gerado} salva com sucesso.")
                 return redirect('Cadastro-Obras')
 
         except Exception:
             logger.exception("Erro ao cadastrar obra")
-            messages.error(request, "⚠️ Erro inesperado ao cadastrar a obra. Tente novamente.")
+            messages.error(request, "Erro inesperado ao cadastrar a obra. Tente novamente.")
             return redirect('Cadastro-Obras')
 
     if request.headers.get('HX-Request'):
@@ -634,7 +634,7 @@ def busca_atualiza_obra(request):
             # Retorna o template de edição
             return render(request, 'edita_obra.html', {'obra': obra_encontrada})
         else:
-            messages.error(request, "⚠️ Nenhuma obra encontrada com este ID.")
+            messages.error(request, "Nenhuma obra encontrada com este ID.")
             return render(request, 'busca_atualiza_obra.html')
         
     if request.headers.get('HX-Request'):
@@ -675,24 +675,24 @@ def salva_edicao_obra(request):
             return render(request, 'index.html', {'template_meio': 'edita_obra.html', **ctx})
 
         if any(not campo for campo in campos_obrigatorios):
-            return _render_edicao("⚠️ Preencha todos os campos obrigatórios antes de salvar.")
+            return _render_edicao("Preencha todos os campos obrigatórios antes de salvar.")
 
         if not data_e_valida(data_inicio, tipo="obra") or not data_e_valida(conclusao_prevista, tipo="obra"):
-            return _render_edicao("⚠️ A Data de Início ou a Conclusão Prevista contém um ano inválido ou irreal.")
+            return _render_edicao("A Data de Início ou a Conclusão Prevista contém um ano inválido ou irreal.")
 
         if data_finalizacao and not data_e_valida(data_finalizacao, tipo="obra"):
-            return _render_edicao("⚠️ A Data de Finalização informada é inválida ou irreal.")
+            return _render_edicao("A Data de Finalização informada é inválida ou irreal.")
 
         dt_inicio = datetime.strptime(data_inicio, '%Y-%m-%d').date()
         dt_conclusao = datetime.strptime(conclusao_prevista, '%Y-%m-%d').date()
 
         if dt_inicio >= dt_conclusao:
-            return _render_edicao("⚠️ A Conclusão Prevista deve ser posterior à Data de Início.")
+            return _render_edicao("A Conclusão Prevista deve ser posterior à Data de Início.")
 
         if data_finalizacao:
             dt_finalizacao = datetime.strptime(data_finalizacao, '%Y-%m-%d').date()
             if dt_inicio >= dt_finalizacao:
-                return _render_edicao("⚠️ A Data de Finalização deve ser posterior à Data de Início.")
+                return _render_edicao("A Data de Finalização deve ser posterior à Data de Início.")
 
         try:
             # 3. FUNÇÃO INTERNA DE FORMATAÇÃO
@@ -755,7 +755,7 @@ def salva_edicao_obra(request):
                     
                 except Exception:
                     logger.exception("Erro ao processar imagens da obra")
-                    messages.error(request, "⚠️ Erro ao processar as imagens enviadas.")
+                    messages.error(request, "Erro ao processar as imagens enviadas.")
 
             # ==========================================
             # 7. EXECUTANDO OS UPDATES NO MONGODB
@@ -778,7 +778,7 @@ def salva_edicao_obra(request):
             dados_para_sheets['ID_OBRA'] = id_obra
             _disparar_em_background(atualizar_no_google_sheets, dados_para_sheets)
             _bump_cache_obras()
-            messages.success(request, f"✅ Obra {id_obra} atualizada com sucesso!")
+            messages.success(request, f"Obra {id_obra} atualizada com sucesso.")
 
             if request.headers.get('HX-Request'):
                 return render(request, 'busca_atualiza_obra.html')
@@ -786,7 +786,7 @@ def salva_edicao_obra(request):
 
         except Exception:
             logger.exception("Erro crítico ao salvar edição de obra")
-            messages.error(request, "⚠️ Erro inesperado ao salvar as alterações. Tente novamente.")
+            messages.error(request, "Erro inesperado ao salvar as alterações. Tente novamente.")
             return render(request, 'busca_atualiza_obra.html') if request.headers.get('HX-Request') else render(request, 'index.html', {'template_meio': 'busca_atualiza_obra.html'})
 
 
@@ -972,5 +972,5 @@ def atualizar_no_google_sheets(dados):
         return True
         
     except Exception as e:
-        print(f"⚠️ Erro ao atualizar Google Sheets: {e}")
+        print(f"Erro ao atualizar Google Sheets: {e}")
         return False
