@@ -9,15 +9,15 @@ from pymongo.errors import DuplicateKeyError
 from django.contrib import messages
 from django.core.cache import cache
 import ntplib
-from datetime import datetime
-from django.contrib.auth.decorators import login_required, user_passes_test
+import uuid
+from datetime import datetime, timedelta
 from django.contrib.auth.models import User
 import cloudinary.uploader
-from django.contrib.auth.forms import AuthenticationForm
 from functools import wraps
 from django.contrib.auth import authenticate, login as auth_login
 from django.contrib.auth import logout as auth_logout
 from django.contrib.messages import get_messages # Adicione este import no topo
+from obras.utils import formatar_data_br, preparar_data_para_input
 # Create your views here.
 
 logger = logging.getLogger(__name__)
@@ -38,104 +38,6 @@ def _disparar_em_background(funcao, *args, **kwargs):
     threading.Thread(target=_executar, daemon=True).start()
 
 
-LOGIN_MAX_TENTATIVAS = 5
-LOGIN_JANELA_BLOQUEIO_SEGUNDOS = 15 * 60  # 15 minutos
-
-
-def _ip_do_cliente(request):
-    """Pega o IP real do request. Em produção (Render) o tráfego passa por um
-    proxy reverso, que define X-Forwarded-For — sem isso, REMOTE_ADDR seria
-    sempre o IP do proxy, não do usuário, e o rate limit nunca bloquearia ninguém."""
-    encaminhado = request.META.get('HTTP_X_FORWARDED_FOR')
-    if encaminhado:
-        return encaminhado.split(',')[0].strip()
-    return request.META.get('REMOTE_ADDR', 'desconhecido')
-
-
-def _chaves_rate_limit_login(request, cpf):
-    """Duas chaves: uma por IP (limita um único computador tentando várias
-    contas) e outra por CPF (limita várias máquinas/IPs diferentes atacando
-    a mesma conta — ex: ataque distribuído contra um único usuário)."""
-    chave_ip = f'login_tentativas_ip_{_ip_do_cliente(request)}'
-    chave_cpf = f'login_tentativas_cpf_{cpf}' if cpf else None
-    return chave_ip, chave_cpf
-
-
-def _formatar_tempo_restante(segundos):
-    minutos = max(1, round(segundos / 60))
-    return f"{minutos} minuto" if minutos == 1 else f"{minutos} minutos"
-
-
-def _ler_contador(chave):
-    """LocMemCache (cache padrão do projeto) não expõe TTL restante via API
-    pública — por isso guardamos (contagem, timestamp_de_expiração) explicitamente
-    em vez de só a contagem, para conseguir calcular quanto tempo falta."""
-    dado = cache.get(chave)
-    if not dado:
-        return 0, 0
-    contagem, expira_em = dado
-    restante = expira_em - datetime.now().timestamp()
-    if restante <= 0:
-        return 0, 0
-    return contagem, restante
-
-
-def _login_esta_bloqueado(chave_ip, chave_cpf):
-    """Retorna (bloqueado, segundos_restantes). Quando ambas as chaves estão
-    bloqueadas, usa o maior tempo restante para informar ao usuário."""
-    maior_restante = 0
-
-    contagem_ip, restante_ip = _ler_contador(chave_ip)
-    if contagem_ip >= LOGIN_MAX_TENTATIVAS:
-        maior_restante = max(maior_restante, restante_ip)
-
-    if chave_cpf:
-        contagem_cpf, restante_cpf = _ler_contador(chave_cpf)
-        if contagem_cpf >= LOGIN_MAX_TENTATIVAS:
-            maior_restante = max(maior_restante, restante_cpf)
-
-    if maior_restante > 0:
-        return True, maior_restante
-    return False, 0
-
-
-def _tentativas_restantes(chave_ip, chave_cpf):
-    """Quantas tentativas ainda restam antes do bloqueio — usa a chave mais
-    próxima do limite (a conta tentada ou o IP, o que estiver mais alto)."""
-    usadas_ip, _ = _ler_contador(chave_ip)
-    usadas_cpf, _ = _ler_contador(chave_cpf) if chave_cpf else (0, 0)
-    usadas = max(usadas_ip, usadas_cpf)
-    return max(0, LOGIN_MAX_TENTATIVAS - usadas)
-
-
-def _registrar_tentativa_falha(chave_ip, chave_cpf):
-    expira_em = datetime.now().timestamp() + LOGIN_JANELA_BLOQUEIO_SEGUNDOS
-    contagem_ip, _ = _ler_contador(chave_ip)
-    cache.set(chave_ip, (contagem_ip + 1, expira_em), LOGIN_JANELA_BLOQUEIO_SEGUNDOS)
-    if chave_cpf:
-        contagem_cpf, _ = _ler_contador(chave_cpf)
-        cache.set(chave_cpf, (contagem_cpf + 1, expira_em), LOGIN_JANELA_BLOQUEIO_SEGUNDOS)
-
-
-def _limpar_tentativas_login(chave_ip, chave_cpf):
-    cache.delete(chave_ip)
-    if chave_cpf:
-        cache.delete(chave_cpf)
-
-
-def _form_ja_em_processamento(request, nome_acao, segundos=4):
-    """Trava server-side contra duplo clique/duplo submit: o hx-indicator do
-    HTMX só desabilita o botão visualmente — não impede um segundo POST real
-    (ex: clique muito rápido, ou script automatizado). Usa o cache como lock
-    de curta duração por usuário+ação."""
-    identificador = request.user.pk if request.user.is_authenticated else _ip_do_cliente(request)
-    chave = f'form_lock_{nome_acao}_{identificador}'
-    if cache.get(chave):
-        return True
-    cache.set(chave, True, segundos)
-    return False
-
-
 CACHE_KEY_VERSAO_OBRAS = 'obras_cache_versao'
 
 
@@ -154,6 +56,7 @@ _db = _mongo_client[os.environ['MONGODB_DB_NAME']]
 colecao_obras = _db['Banco_Obras']
 colecao_funcionarios = _db['Banco_funcionarios']
 colecao_timelapse = _db['Banco_Timelapse']
+colecao_seguranca_login = _db['Banco_SegurancaLogin']
 
 try:
     # Garante (de forma idempotente) que dois cadastros nunca gravem o mesmo ID_OBRA,
@@ -162,8 +65,207 @@ try:
 except Exception:
     logger.exception("Não foi possível garantir o índice único em ID_OBRA")
 
+try:
+    # Acelera a ordenação por mais recente em lista_obras (sort + skip + limit).
+    colecao_obras.create_index('TIMESTAMP_CADASTRO')
+except Exception:
+    logger.exception("Não foi possível garantir o índice em TIMESTAMP_CADASTRO")
+
+try:
+    # Acelera a busca/edição de funcionário por CPF.
+    colecao_funcionarios.create_index('CPF')
+except Exception:
+    logger.exception("Não foi possível garantir o índice em CPF")
+
+try:
+    # Acelera a busca de fotos/histórico de uma obra (galeria_obra, timelapse).
+    colecao_timelapse.create_index('ID_OBRA')
+except Exception:
+    logger.exception("Não foi possível garantir o índice em ID_OBRA (timelapse)")
+
+try:
+    # TTL index: o Mongo apaga sozinho os documentos de bloqueio assim que
+    # 'expira_em' é alcançado — não precisa de job de limpeza manual.
+    colecao_seguranca_login.create_index('expira_em', expireAfterSeconds=0)
+except Exception:
+    logger.exception("Não foi possível garantir o índice TTL em Banco_SegurancaLogin")
+
 GOOGLE_SHEETS_CREDENTIALS_FILE = os.environ.get('GOOGLE_SHEETS_CREDENTIALS_FILE', 'credenciais.json')
 GOOGLE_SHEETS_SPREADSHEET_NAME = os.environ.get('GOOGLE_SHEETS_SPREADSHEET_NAME', 'Data base OBRAS DE ITABIANA')
+
+
+# ==========================================
+# RATE LIMIT DE LOGIN — persistido no MongoDB (não em cache de processo)
+# ==========================================
+# Usar LocMemCache para isso tem um problema em produção: é por processo, então
+# um restart/deploy no Render (ou o app "dormindo" no free tier) zera todos os
+# contadores de bloqueio de graça para qualquer atacante. Guardando no Mongo,
+# o bloqueio sobrevive a restarts.
+LOGIN_MAX_TENTATIVAS = 5
+LOGIN_JANELA_BLOQUEIO_SEGUNDOS = 15 * 60  # 15 minutos
+LOGIN_BLOQUEIOS_PARA_ALERTA = 3  # nº de bloqueios na mesma conta em 24h que dispara alerta de ataque direcionado
+
+
+def _ip_do_cliente(request):
+    """Pega o IP real do request. Em produção (Render) o tráfego passa por um
+    proxy reverso, que define X-Forwarded-For — sem isso, REMOTE_ADDR seria
+    sempre o IP do proxy, não do usuário, e o rate limit nunca bloquearia ninguém."""
+    encaminhado = request.META.get('HTTP_X_FORWARDED_FOR')
+    if encaminhado:
+        return encaminhado.split(',')[0].strip()
+    return request.META.get('REMOTE_ADDR', 'desconhecido')
+
+
+def _formatar_tempo_restante(segundos):
+    minutos = max(1, round(segundos / 60))
+    return f"{minutos} minuto" if minutos == 1 else f"{minutos} minutos"
+
+
+def _chaves_rate_limit_login(request, cpf):
+    """Duas chaves: uma por IP (limita um único computador tentando várias
+    contas) e outra por CPF (limita várias máquinas/IPs diferentes atacando
+    a mesma conta — ex: ataque distribuído contra um único usuário)."""
+    chave_ip = f'login_ip_{_ip_do_cliente(request)}'
+    chave_cpf = f'login_cpf_{cpf}' if cpf else None
+    return chave_ip, chave_cpf
+
+
+def _ler_contador_login(chave):
+    """Lê (contagem, segundos_restantes) do documento de rate-limit no Mongo."""
+    doc = colecao_seguranca_login.find_one({'_id': chave})
+    if not doc:
+        return 0, 0
+    restante = (doc['expira_em'] - datetime.utcnow()).total_seconds()
+    if restante <= 0:
+        return 0, 0
+    return doc.get('contagem', 0), restante
+
+
+def _login_esta_bloqueado(chave_ip, chave_cpf):
+    """Retorna (bloqueado, segundos_restantes). Quando ambas as chaves estão
+    bloqueadas, usa o maior tempo restante para informar ao usuário."""
+    maior_restante = 0
+
+    contagem_ip, restante_ip = _ler_contador_login(chave_ip)
+    if contagem_ip >= LOGIN_MAX_TENTATIVAS:
+        maior_restante = max(maior_restante, restante_ip)
+
+    if chave_cpf:
+        contagem_cpf, restante_cpf = _ler_contador_login(chave_cpf)
+        if contagem_cpf >= LOGIN_MAX_TENTATIVAS:
+            maior_restante = max(maior_restante, restante_cpf)
+
+    if maior_restante > 0:
+        return True, maior_restante
+    return False, 0
+
+
+def _tentativas_restantes(chave_ip, chave_cpf):
+    """Quantas tentativas ainda restam antes do bloqueio — usa a chave mais
+    próxima do limite (a conta tentada ou o IP, o que estiver mais alto)."""
+    usadas_ip, _ = _ler_contador_login(chave_ip)
+    usadas_cpf, _ = _ler_contador_login(chave_cpf) if chave_cpf else (0, 0)
+    usadas = max(usadas_ip, usadas_cpf)
+    return max(0, LOGIN_MAX_TENTATIVAS - usadas)
+
+
+def _registrar_tentativa_falha_login(request, chave_ip, chave_cpf, cpf_tentado):
+    agora = datetime.utcnow()
+    expira_em = agora + timedelta(seconds=LOGIN_JANELA_BLOQUEIO_SEGUNDOS)
+
+    contagem_ip, _ = _ler_contador_login(chave_ip)
+    nova_contagem_ip = contagem_ip + 1
+    colecao_seguranca_login.update_one(
+        {'_id': chave_ip},
+        {'$set': {'contagem': nova_contagem_ip, 'expira_em': expira_em, 'atualizado_em': agora}},
+        upsert=True,
+    )
+
+    nova_contagem_cpf = 0
+    if chave_cpf:
+        contagem_cpf, _ = _ler_contador_login(chave_cpf)
+        nova_contagem_cpf = contagem_cpf + 1
+        colecao_seguranca_login.update_one(
+            {'_id': chave_cpf},
+            {'$set': {'contagem': nova_contagem_cpf, 'expira_em': expira_em, 'atualizado_em': agora}},
+            upsert=True,
+        )
+
+    if max(nova_contagem_ip, nova_contagem_cpf) >= LOGIN_MAX_TENTATIVAS:
+        logger.warning(
+            "Login bloqueado por excesso de tentativas — IP=%s CPF=%s",
+            _ip_do_cliente(request), cpf_tentado or '(vazio)'
+        )
+        if chave_cpf:
+            _registrar_bloqueio_repetido(cpf_tentado)
+
+
+def _registrar_bloqueio_repetido(cpf_tentado):
+    """Conta quantas vezes essa conta foi bloqueada nas últimas 24h. Vários
+    bloqueios seguidos na mesma conta sugerem um ataque direcionado a um
+    usuário específico (não só um erro de digitação ocasional)."""
+    chave_alerta = f'login_alerta_cpf_{cpf_tentado}'
+    agora = datetime.utcnow()
+    expira_em = agora + timedelta(hours=24)
+
+    doc = colecao_seguranca_login.find_one({'_id': chave_alerta})
+    contagem_atual = doc.get('contagem', 0) if doc and doc['expira_em'] > agora else 0
+    nova_contagem = contagem_atual + 1
+
+    colecao_seguranca_login.update_one(
+        {'_id': chave_alerta},
+        {'$set': {'contagem': nova_contagem, 'expira_em': expira_em, 'atualizado_em': agora}},
+        upsert=True,
+    )
+
+    if nova_contagem >= LOGIN_BLOQUEIOS_PARA_ALERTA:
+        logger.warning(
+            "ALERTA: a conta CPF=%s foi bloqueada %s vezes nas últimas 24h — "
+            "possível ataque direcionado a este usuário específico.",
+            cpf_tentado, nova_contagem
+        )
+
+
+def _limpar_tentativas_login(chave_ip, chave_cpf):
+    colecao_seguranca_login.delete_one({'_id': chave_ip})
+    if chave_cpf:
+        colecao_seguranca_login.delete_one({'_id': chave_cpf})
+
+
+def _form_ja_em_processamento(request, nome_acao, segundos=4):
+    """Trava server-side contra duplo clique/duplo submit: o hx-indicator do
+    HTMX só desabilita o botão visualmente — não impede um segundo POST real
+    (ex: clique muito rápido, ou script automatizado). Usa o cache como lock
+    de curta duração por usuário+ação. Só checa — não marca; use
+    `_marcar_form_em_processamento` depois que a validação passar, para não
+    travar o usuário por 'culpa' de um formulário que nem chegou a ser salvo."""
+    identificador = request.user.pk if request.user.is_authenticated else _ip_do_cliente(request)
+    chave = f'form_lock_{nome_acao}_{identificador}'
+    return bool(cache.get(chave))
+
+
+def _marcar_form_em_processamento(request, nome_acao, segundos=4):
+    identificador = request.user.pk if request.user.is_authenticated else _ip_do_cliente(request)
+    chave = f'form_lock_{nome_acao}_{identificador}'
+    cache.set(chave, True, segundos)
+
+
+def _gerar_form_token():
+    return uuid.uuid4().hex
+
+
+def _token_ja_usado(token):
+    """Idempotência por token: cada carregamento do formulário recebe um
+    token único (campo oculto). Se o mesmo token chegar duas vezes — duplo
+    clique, segunda aba, replay de request — a segunda é rejeitada, mesmo
+    que venha rápido o suficiente para escapar da trava de tempo acima."""
+    if not token:
+        return False  # sem token (ex: chamada antiga/externa) não bloqueia, só não protege
+    chave = f'form_token_{token}'
+    if cache.get(chave):
+        return True
+    cache.set(chave, True, 300)  # 5 minutos é mais que suficiente para qualquer reenvio
+    return False
 
 def pagina_inicial(request):
     return render(request, 'index.html')
@@ -203,6 +305,41 @@ def data_e_valida(data_str, tipo="geral"):
         # Cai aqui se a data for inválida (ex: 31/02/2026)
         return False
 
+
+def validar_cpf(cpf):
+    """Confere o dígito verificador do CPF (algoritmo oficial, módulo 11).
+    Recebe só dígitos (sem pontuação). Rejeita também sequências repetidas
+    (ex: 111.111.111-11), que passariam no cálculo mas não são CPFs reais."""
+    if not cpf or len(cpf) != 11 or not cpf.isdigit() or cpf == cpf[0] * 11:
+        return False
+
+    for i in range(9, 11):
+        soma = sum(int(cpf[num]) * ((i + 1) - num) for num in range(0, i))
+        digito = ((soma * 10) % 11) % 10
+        if digito != int(cpf[i]):
+            return False
+    return True
+
+
+def validar_cnpj(cnpj):
+    """Confere os dois dígitos verificadores do CNPJ (algoritmo oficial,
+    módulo 11 com pesos). Recebe só dígitos (sem pontuação)."""
+    if not cnpj or len(cnpj) != 14 or not cnpj.isdigit() or cnpj == cnpj[0] * 14:
+        return False
+
+    pesos_1 = [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]
+    pesos_2 = [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]
+
+    def _calcular_digito(base, pesos):
+        soma = sum(int(d) * p for d, p in zip(base, pesos))
+        resto = soma % 11
+        return 0 if resto < 2 else 11 - resto
+
+    digito_1 = _calcular_digito(cnpj[:12], pesos_1)
+    digito_2 = _calcular_digito(cnpj[:12] + str(digito_1), pesos_2)
+    return cnpj[-2:] == f"{digito_1}{digito_2}"
+
+
 def login_view(request):
     # Só mostra o aviso de ?aviso= na carga inicial (GET). O <form> desta página
     # reenvia para request.get_full_path(), que inclui essa mesma query string —
@@ -216,6 +353,7 @@ def login_view(request):
         elif aviso == 'saiu':
             messages.info(request, "Sessão encerrada com sucesso.")
             return redirect('login')
+        return render(request, 'login.html')
 
     if request.method == 'POST':
         usuario_cpf = request.POST.get('username', '').replace('.', '').replace('-', '')
@@ -226,7 +364,9 @@ def login_view(request):
         if bloqueado:
             tempo = _formatar_tempo_restante(segundos_restantes)
             messages.error(request, f"Muitas tentativas de login incorretas. Tente novamente em {tempo}.")
-            return render(request, 'login.html')
+            # Redirect (não render direto) — assim um F5 do usuário não reenvia o
+            # POST e não gasta tentativa/bloqueio de novo à toa.
+            return redirect('login')
 
         user = authenticate(request, username=usuario_cpf, password=senha_digitada)
 
@@ -247,7 +387,7 @@ def login_view(request):
             proxima_pagina = request.GET.get('next', 'inicio')
             return redirect(proxima_pagina)
         else:
-            _registrar_tentativa_falha(chave_ip, chave_cpf)
+            _registrar_tentativa_falha_login(request, chave_ip, chave_cpf, usuario_cpf)
             restantes = _tentativas_restantes(chave_ip, chave_cpf)
             # Se errar o login, também limpamos antes de mostrar o erro
             storage = get_messages(request)
@@ -259,7 +399,9 @@ def login_view(request):
             else:
                 tempo = _formatar_tempo_restante(LOGIN_JANELA_BLOQUEIO_SEGUNDOS)
                 messages.error(request, f"CPF ou Senha incorretos. Login bloqueado por {tempo} devido ao excesso de tentativas.")
-            return render(request, 'login.html')
+            # Redirect (não render direto) — mesmo motivo: evitar reenvio da
+            # tentativa de login (e do POST de senha) num F5.
+            return redirect('login')
 
     return render(request, 'login.html')
 def logout_view(request):
@@ -293,7 +435,7 @@ def pegar_ano_google():
         cliente_ntp = ntplib.NTPClient()
         resposta = cliente_ntp.request('pool.ntp.org', version=3)
         return datetime.fromtimestamp(resposta.tx_time).year
-    except:
+    except Exception:
         # Se a internet falhar, usamos o ano do sistema como plano B
         return datetime.now().year
     
@@ -307,21 +449,22 @@ def cadastro_funcionario(request):
         messages.error(request, "Acesso negado. Esta área é exclusiva para supervisores.")
         return redirect('inicio')
         
+    def _render_cadastro_func(msg, nivel='warning'):
+        getattr(messages, nivel)(request, msg)
+        # Guarda os campos digitados na sessão (não dá pra repor depois de um
+        # redirect de outra forma) e redireciona — em vez de devolver a página
+        # direto do POST, o que faria o navegador reenviar o formulário a cada F5.
+        request.session['erro_cadastro_funcionario'] = request.POST.dict()
+        return redirect('cadastro_funcionario')
+
     if request.method == 'POST' and 'btn-salvar' in request.POST:
         if _form_ja_em_processamento(request, 'cadastro_funcionario'):
-            messages.warning(request, "Sua solicitação já está sendo processada. Aguarde alguns segundos.")
-            return render(request, 'cadastro_funcionario.html', {'dados': request.POST})
+            return _render_cadastro_func("Sua solicitação já está sendo processada. Aguarde alguns segundos.")
+
+        if _token_ja_usado(request.POST.get('form_token', '')):
+            return _render_cadastro_func("Este cadastro já foi enviado. Se precisar cadastrar outro funcionário, recarregue a página.")
 
         try:
-            def formatar_data_br(data_str):
-                if not data_str:
-                    return '—'
-                try:
-                    ano, mes, dia = data_str.split('-')
-                    return f"{dia}/{mes}/{ano[:4]}"
-                except:
-                    return data_str
-                    
             rg_limpo = request.POST.get('RG', '').replace('.', '').replace('-', '')
             cpf_limpo = request.POST.get('CPF', '').replace('.', '').replace('-', '')
             
@@ -341,8 +484,7 @@ def cadastro_funcionario(request):
             for campo in campos_obrigatorios:
                 valor = documento_funcionario.get(campo, '')
                 if not valor or str(valor).strip() == "" or valor == '—':
-                    messages.warning(request, "Preencha todos os campos obrigatórios.")
-                    return render(request, 'cadastro_funcionario.html', {'dados': request.POST})
+                    return _render_cadastro_func("Preencha todos os campos obrigatórios.")
 
             # ==========================================
             # 2.5 TRAVA DE SEGURANÇA DA DATA DE NASCIMENTO
@@ -351,15 +493,24 @@ def cadastro_funcionario(request):
             
             # Chama a função validadora que criamos no topo do views.py
             if not data_e_valida(data_nasc_str, tipo="nascimento"):
-                messages.warning(request, "A data de nascimento informada é inválida ou irreal.")
-                return render(request, 'cadastro_funcionario.html', {'dados': request.POST})
+                return _render_cadastro_func("A data de nascimento informada é inválida ou irreal.")
+            # ==========================================
+
+            # ==========================================
+            # 2.6 TRAVA DE SEGURANÇA DO CPF (dígito verificador)
+            # ==========================================
+            if not validar_cpf(documento_funcionario['CPF']):
+                return _render_cadastro_func("O CPF informado é inválido.")
             # ==========================================
 
             # 3. VERIFICAÇÃO DE DUPLICIDADE (Evita crash no Django)
             cpf = documento_funcionario['CPF']
             if User.objects.filter(username=cpf).exists():
-                messages.error(request, 'Já existe um funcionário cadastrado com este CPF.')
-                return render(request, 'cadastro_funcionario.html', {'dados': request.POST})
+                return _render_cadastro_func('Já existe um funcionário cadastrado com este CPF.', nivel='error')
+
+            # Só trava contra duplo submit agora que passamos por todas as validações —
+            # assim um erro de validação não consome a janela de bloqueio à toa.
+            _marcar_form_em_processamento(request, 'cadastro_funcionario')
 
             # 4. CÁLCULO DA IDADE (Agora é 100% seguro, pois a data foi validada acima)
             data_nascimento_obj = datetime.strptime(data_nasc_str, '%Y-%m-%d').date()
@@ -387,20 +538,32 @@ def cadastro_funcionario(request):
             del documento_funcionario['NIVEL_ACESSO']
 
             # 7. INSERÇÃO NO MONGODB
-            colecao_funcionarios.insert_one(documento_funcionario)
+            # Se isso falhar, o usuário Django já foi criado (passo 5) e ficaria
+            # "órfão" — consegue logar mas sem perfil em Banco_funcionarios.
+            # Como as duas gravações não compartilham uma transação (bancos
+            # diferentes), desfazemos manualmente o usuário Django nesse caso.
+            try:
+                colecao_funcionarios.insert_one(documento_funcionario)
+            except Exception:
+                novo_usuario.delete()
+                raise
 
             messages.success(request, f"Funcionário {nome} cadastrado com sucesso.")
             return redirect('cadastro_funcionario')
 
         except Exception:
             logger.exception("Erro ao cadastrar funcionário")
-            messages.error(request, "Erro inesperado ao cadastrar. Tente novamente.")
-            return render(request, 'cadastro_funcionario.html', {'dados': request.POST})
+            return _render_cadastro_func("Erro inesperado ao cadastrar. Tente novamente.", nivel='error')
+
+    contexto_token = {'form_token': _gerar_form_token()}
+    dados_repostos = request.session.pop('erro_cadastro_funcionario', None)
+    if dados_repostos:
+        contexto_token['dados'] = dados_repostos
 
     if request.headers.get('HX-Request'):
-        return render(request, 'cadastro_funcionario.html')
+        return render(request, 'cadastro_funcionario.html', contexto_token)
 
-    return render(request, 'index.html', {'template_meio': 'cadastro_funcionario.html'})
+    return render(request, 'index.html', {'template_meio': 'cadastro_funcionario.html', **contexto_token})
 
 
 
@@ -427,15 +590,15 @@ def busca_atualiza_funcionario(request):
                 d, m, a = data_nasc.split('/')
                 funcionario['DATA_NASCIMENTO'] = f"{a}-{m}-{d}"
             
-            contexto = {'funcionario': funcionario}
+            contexto = {'funcionario': funcionario, 'form_token': _gerar_form_token()}
 
             # Se for HTMX, manda só o formulário de edição
             if request.headers.get('HX-Request'):
                 return render(request, 'edita_funcionario.html', contexto)
-            
+
             # Se for acesso direto (F5 no resultado da busca), manda a index com o template de edição
             return render(request, 'index.html', {
-                'template_meio': 'edita_funcionario.html', 
+                'template_meio': 'edita_funcionario.html',
                 **contexto
             })
 
@@ -458,15 +621,40 @@ def busca_atualiza_funcionario(request):
 
 
 def salva_edicao_funcionario(request):
+    # 1. Bloqueio para quem nem logou ainda
+    if not request.user.is_authenticated:
+        return redirect(f'/login/?next={request.path}')
+
+    # 2. Bloqueio para quem está logado mas é COMUM (não é staff)
+    if not request.user.is_staff:
+        messages.error(request, "Acesso negado. Esta área é exclusiva para supervisores.")
+        return redirect('inicio')
+
+    def _dados_para_repor(request):
+        """Snapshot dos campos digitados, pra reexibir o formulário de edição
+        preenchido depois do redirect (em vez de perder tudo e mandar o
+        usuário refazer a busca)."""
+        return {
+            'CPF': request.POST.get('CPF_ORIGINAL', ''),
+            'NOME': request.POST.get('NOME', ''),
+            'DATA_NASCIMENTO': request.POST.get('DATA_NASCIMENTO', ''),
+            'RG': request.POST.get('RG', ''),
+            'FUNCAO': request.POST.get('FUNCAO', ''),
+        }
+
     if request.method == 'POST':
         if _form_ja_em_processamento(request, 'salva_edicao_funcionario'):
             messages.warning(request, "Sua solicitação já está sendo processada. Aguarde alguns segundos.")
-            if request.headers.get('HX-Request'):
-                return render(request, 'busca_atualiza_funcionario.html')
-            return render(request, 'index.html', {'template_meio': 'busca_atualiza_funcionario.html'})
+            request.session['erro_edicao_funcionario'] = _dados_para_repor(request)
+            return redirect('salva_edicao_funcionario')
+
+        if _token_ja_usado(request.POST.get('form_token', '')):
+            messages.warning(request, "Esta edição já foi enviada. Se precisar editar novamente, refaça a busca.")
+            request.session['erro_edicao_funcionario'] = _dados_para_repor(request)
+            return redirect('salva_edicao_funcionario')
 
         cpf_original = request.POST.get('CPF_ORIGINAL')
-        
+
         # 1. COLETA E LIMPEZA INICIAL DOS DADOS
         nome_novo = request.POST.get('NOME', '').strip()
         funcao_nova = request.POST.get('FUNCAO', '').strip()
@@ -477,14 +665,11 @@ def salva_edicao_funcionario(request):
         # 2. TRAVA DE SEGURANÇA CONTRA CAMPOS VAZIOS
         # ==========================================
         campos_obrigatorios = [nome_novo, funcao_nova, rg_novo, data_input]
-        
+
         if any(not campo for campo in campos_obrigatorios):
             messages.warning(request, "Não é permitido deixar Nome, RG, Função ou Data de Nascimento em branco.")
-            
-            # Mantém o fluxo correto do seu HTMX caso dê erro
-            if request.headers.get('HX-Request'):
-                return render(request, 'busca_atualiza_funcionario.html')
-            return render(request, 'index.html', {'template_meio': 'busca_atualiza_funcionario.html'})
+            request.session['erro_edicao_funcionario'] = _dados_para_repor(request)
+            return redirect('salva_edicao_funcionario')
         # ==========================================
 
         # ==========================================
@@ -492,26 +677,15 @@ def salva_edicao_funcionario(request):
         # ==========================================
         if not data_e_valida(data_input, tipo="nascimento"):
             messages.warning(request, "A data de nascimento informada é inválida ou irreal.")
-            contexto_erro = {'funcionario': {
-                'CPF': request.POST.get('CPF_ORIGINAL', ''),
-                'NOME': request.POST.get('NOME', ''),
-                'DATA_NASCIMENTO': data_input,
-                'RG': request.POST.get('RG', ''),
-                'FUNCAO': request.POST.get('FUNCAO', ''),
-            }}
-            if request.headers.get('HX-Request'):
-                return render(request, 'edita_funcionario.html', contexto_erro)
-            return render(request, 'index.html', {'template_meio': 'edita_funcionario.html', **contexto_erro})
+            request.session['erro_edicao_funcionario'] = _dados_para_repor(request)
+            return redirect('salva_edicao_funcionario')
         # ==========================================
 
+        # Só trava contra duplo submit agora que passamos por todas as validações.
+        _marcar_form_em_processamento(request, 'salva_edicao_funcionario')
+
         # 3. Formata a data para o padrão BR (DD/MM/AAAA)
-        data_br = "—"
-        if data_input:
-            try:
-                a, m, d = data_input.split('-')
-                data_br = f"{d}/{m}/{a}"
-            except:
-                data_br = data_input
+        data_br = formatar_data_br(data_input)
 
         # 4. Prepara os dados para o MongoDB
         nome_novo = nome_novo.upper()
@@ -548,17 +722,25 @@ def salva_edicao_funcionario(request):
 
         except User.DoesNotExist:
             messages.error(request, "Usuário não encontrado na tabela de autenticação.")
-            if request.headers.get('HX-Request'):
-                return render(request, 'busca_atualiza_funcionario.html')
-            return render(request, 'index.html', {'template_meio': 'busca_atualiza_funcionario.html'})
+            return redirect('salva_edicao_funcionario')
 
         # 6. ATUALIZAÇÃO NO MONGODB
         # Nota: Não salvamos a senha no Mongo, conforme sua lógica anterior
         colecao_funcionarios.update_one({'CPF': cpf_original}, {'$set': dados_atualizados_mongo})
 
         messages.success(request, f"Dados de {nome_novo} atualizados com sucesso.")
-        
-    # Retorno adequado para HTMX ou acesso direto
+        # Redirect (PRG) — sem isso, um F5 depois de salvar reenviaria o POST
+        # e tentaria salvar a edição de novo.
+        return redirect('salva_edicao_funcionario')
+
+    # Retorno adequado para HTMX ou acesso direto (GET, ou após o redirect acima)
+    dados_repostos = request.session.pop('erro_edicao_funcionario', None)
+    if dados_repostos:
+        contexto_erro = {'funcionario': dados_repostos, 'form_token': _gerar_form_token()}
+        if request.headers.get('HX-Request'):
+            return render(request, 'edita_funcionario.html', contexto_erro)
+        return render(request, 'index.html', {'template_meio': 'edita_funcionario.html', **contexto_erro})
+
     if request.headers.get('HX-Request'):
         return render(request, 'busca_atualiza_funcionario.html')
     return render(request, 'index.html', {'template_meio': 'busca_atualiza_funcionario.html'})
@@ -573,9 +755,19 @@ def cadastro_obras(request):
         return redirect(f'/login/?next={request.path}')
 
     if request.method == 'POST' and 'btn-salvar' in request.POST:
+        def _render_cadastro(msg, nivel='warning'):
+            getattr(messages, nivel)(request, msg)
+            # Guarda os campos (texto) na sessão e redireciona — evita que um F5
+            # reenvie o POST (e as fotos) de novo. As fotos em si não dá pra repor
+            # (não vêm de volta do navegador), o usuário precisa reanexá-las.
+            request.session['erro_cadastro_obras'] = request.POST.dict()
+            return redirect('Cadastro-Obras')
+
         if _form_ja_em_processamento(request, 'cadastro_obras'):
-            messages.warning(request, "Sua solicitação já está sendo processada. Aguarde alguns segundos.")
-            return render(request, 'cadastro_obras.html', {'dados': request.POST})
+            return _render_cadastro("Sua solicitação já está sendo processada. Aguarde alguns segundos.")
+
+        if _token_ja_usado(request.POST.get('form_token', '')):
+            return _render_cadastro("Este cadastro já foi enviado. Se precisar cadastrar outra obra, recarregue a página.")
 
         # Coleta fora do try para que erros de validação nunca sejam engolidos pelo except externo
         id_obra_manual = request.POST.get('ID_OBRA_MANUAL', '').strip()
@@ -599,14 +791,12 @@ def cadastro_obras(request):
             conclusao_prevista, nome_empresa, cnpj_empresa,
             tipo_execucao, endereco
         ]
-        def _render_cadastro(msg):
-            messages.warning(request, msg)
-            if request.headers.get('HX-Request'):
-                return render(request, 'cadastro_obras.html', {'dados': request.POST})
-            return render(request, 'index.html', {'template_meio': 'cadastro_obras.html', 'dados': request.POST})
 
         if any(not campo for campo in campos_obrigatorios) or not fotos_arquivos:
             return _render_cadastro("Preencha todos os campos obrigatórios e envie pelo menos uma foto da obra.")
+
+        if not validar_cnpj(cnpj_empresa.replace('.', '').replace('/', '').replace('-', '')):
+            return _render_cadastro("O CNPJ informado é inválido.")
 
         if not data_e_valida(data_inicio, tipo="obra") or not data_e_valida(conclusao_prevista, tipo="obra"):
             return _render_cadastro("A Data de Início ou a Conclusão Prevista contém um ano inválido ou irreal.")
@@ -625,6 +815,11 @@ def cadastro_obras(request):
             if dt_inicio >= dt_finalizacao:
                 return _render_cadastro("A Data de Finalização deve ser posterior à Data de Início.")
 
+        # Só trava contra duplo submit agora — e por mais tempo que os outros
+        # formulários, porque o upload de fotos pro Cloudinary pode demorar
+        # vários segundos em conexão ruim (4s seria curto demais aqui).
+        _marcar_form_em_processamento(request, 'cadastro_obras', segundos=12)
+
         try:
             # 4. UPLOAD MÚLTIPLO (Cloudinary)
             colecao = colecao_obras
@@ -634,18 +829,11 @@ def cadastro_obras(request):
                     resultado_upload = cloudinary.uploader.upload(foto, folder="obras_projeto")
                     urls_galeria.append(resultado_upload.get('secure_url'))
             except Exception:
-                messages.error(request, "Erro ao enviar as imagens para o servidor.")
-                return render(request, 'cadastro_obras.html', {'dados': request.POST})
+                return _render_cadastro("Erro ao enviar as imagens para o servidor.", nivel='error')
 
             url_da_foto_capa = urls_galeria[0] if urls_galeria else ""
 
             # 5. MONTAGEM DO DICIONÁRIO (Fiel ao Banco e Planilha)
-            def formatar_data_br(data_str):
-                if not data_str: return '—'
-                try:
-                    ano, mes, dia = data_str.split('-')
-                    return f"{dia}/{mes}/{ano[:4]}"
-                except: return data_str
 
             # Padronização da Empresa para a Planilha
             empresa_completa = f"{nome_empresa.upper()} - CNPJ - {cnpj_empresa}"
@@ -693,8 +881,7 @@ def cadastro_obras(request):
                     break
                 except DuplicateKeyError:
                     if id_obra_manual:
-                        messages.error(request, f"O ID {id_obra_manual} já está cadastrado no banco de dados.")
-                        return render(request, 'cadastro_obras.html', {'dados': request.POST})
+                        return _render_cadastro(f"O ID {id_obra_manual} já está cadastrado no banco de dados.", nivel='error')
                     continue  # outro cadastro pegou esse número primeiro: recalcula e tenta de novo
 
             if resultado is None:
@@ -712,7 +899,8 @@ def cadastro_obras(request):
                     'TIMESTAMP': agora
                 } for url in urls_galeria]
                 if registros: colecao_historico.insert_many(registros)
-            except Exception as e: print(f"Erro Timelapse: {e}")
+            except Exception:
+                logger.exception("Erro ao registrar timelapse da obra")
 
             # 8. SALVAR NO GOOGLE SHEETS (em segundo plano: a planilha é só espelhamento
             # best-effort e não deve atrasar a resposta ao usuário)
@@ -727,9 +915,14 @@ def cadastro_obras(request):
             messages.error(request, "Erro inesperado ao cadastrar a obra. Tente novamente.")
             return redirect('Cadastro-Obras')
 
+    contexto_token = {'form_token': _gerar_form_token()}
+    dados_repostos = request.session.pop('erro_cadastro_obras', None)
+    if dados_repostos:
+        contexto_token['dados'] = dados_repostos
+
     if request.headers.get('HX-Request'):
-        return render(request, 'cadastro_obras.html')
-    return render(request, 'index.html', {'template_meio': 'cadastro_obras.html'})
+        return render(request, 'cadastro_obras.html', contexto_token)
+    return render(request, 'index.html', {'template_meio': 'cadastro_obras.html', **contexto_token})
 
 def busca_atualiza_obra(request):
     # 1. Bloqueio para quem nem logou ainda
@@ -744,27 +937,21 @@ def busca_atualiza_obra(request):
         obra_encontrada = colecao_obras.find_one({'ID_OBRA': id_obra_pesquisado})
 
         if obra_encontrada:
-            # --- FUNÇÃO REVERSA DA DATA ---
-            # Transforma "DD/MM/AAAA" de volta para "AAAA-MM-DD"
-            def preparar_data_para_input(data_br):
-                if not data_br or data_br == '—':
-                    return ""
-                try:
-                    dia, mes, ano = data_br.split('/')
-                    return f"{ano}-{mes}-{dia}"
-                except:
-                    return ""
-
             # Convertendo as datas para o formulário entender
             obra_encontrada['DATA_INICIO'] = preparar_data_para_input(obra_encontrada.get('DATA_INICIO'))
             obra_encontrada['CONCLUSAO_PREVISTA'] = preparar_data_para_input(obra_encontrada.get('CONCLUSAO_PREVISTA'))
             obra_encontrada['DATA_FINALIZACAO'] = preparar_data_para_input(obra_encontrada.get('DATA_FINALIZACAO'))
 
             # Retorna o template de edição
-            return render(request, 'edita_obra.html', {'obra': obra_encontrada})
+            contexto = {'obra': obra_encontrada, 'form_token': _gerar_form_token()}
+            if request.headers.get('HX-Request'):
+                return render(request, 'edita_obra.html', contexto)
+            return render(request, 'index.html', {'template_meio': 'edita_obra.html', **contexto})
         else:
             messages.error(request, "Nenhuma obra encontrada com este ID.")
-            return render(request, 'busca_atualiza_obra.html')
+            if request.headers.get('HX-Request'):
+                return render(request, 'busca_atualiza_obra.html')
+            return render(request, 'index.html', {'template_meio': 'busca_atualiza_obra.html'})
         
     if request.headers.get('HX-Request'):
         return render(request, 'busca_atualiza_obra.html')
@@ -773,10 +960,23 @@ def busca_atualiza_obra(request):
 
 
 def salva_edicao_obra(request):
+    # 1. Bloqueio para quem nem logou ainda
+    if not request.user.is_authenticated:
+        return redirect(f'/login/?next={request.path}')
+
     if request.method == 'POST':
+        def _render_edicao(msg):
+            messages.warning(request, msg)
+            # Guarda os campos (texto) na sessão e redireciona — evita reenvio do
+            # POST (e das fotos) num F5. Fotos novas em si não dá pra repor.
+            request.session['erro_edicao_obra'] = request.POST.dict()
+            return redirect('salva_edicao_obra')
+
         if _form_ja_em_processamento(request, 'salva_edicao_obra'):
-            messages.warning(request, "Sua solicitação já está sendo processada. Aguarde alguns segundos.")
-            return render(request, 'edita_obra.html', {'obra': request.POST}) if request.headers.get('HX-Request') else render(request, 'index.html', {'template_meio': 'edita_obra.html', 'obra': request.POST})
+            return _render_edicao("Sua solicitação já está sendo processada. Aguarde alguns segundos.")
+
+        if _token_ja_usado(request.POST.get('form_token', '')):
+            return _render_edicao("Esta edição já foi enviada. Se precisar editar novamente, refaça a busca.")
 
         # Coleta fora do try para que erros de validação nunca sejam engolidos pelo except externo
         id_obra = request.POST.get('ID_OBRA', '').strip()
@@ -800,15 +1000,12 @@ def salva_edicao_obra(request):
             conclusao_prevista, nome_empresa, cnpj_empresa,
             tipo_execucao, endereco
         ]
-        def _render_edicao(msg):
-            messages.warning(request, msg)
-            ctx = {'obra': request.POST}
-            if request.headers.get('HX-Request'):
-                return render(request, 'edita_obra.html', ctx)
-            return render(request, 'index.html', {'template_meio': 'edita_obra.html', **ctx})
 
         if any(not campo for campo in campos_obrigatorios):
             return _render_edicao("Preencha todos os campos obrigatórios antes de salvar.")
+
+        if not validar_cnpj(cnpj_empresa.replace('.', '').replace('/', '').replace('-', '')):
+            return _render_edicao("O CNPJ informado é inválido.")
 
         if not data_e_valida(data_inicio, tipo="obra") or not data_e_valida(conclusao_prevista, tipo="obra"):
             return _render_edicao("A Data de Início ou a Conclusão Prevista contém um ano inválido ou irreal.")
@@ -827,26 +1024,22 @@ def salva_edicao_obra(request):
             if dt_inicio >= dt_finalizacao:
                 return _render_edicao("A Data de Finalização deve ser posterior à Data de Início.")
 
-        try:
-            # 3. FUNÇÃO INTERNA DE FORMATAÇÃO
-            def formatar_para_db(data_str):
-                if not data_str or data_str == '—': return '—'
-                try:
-                    ano, mes, dia = data_str.split('-')
-                    return f"{dia}/{mes}/{ano[:4]}"
-                except: return data_str
+        # Só trava contra duplo submit agora — e por mais tempo, pois a edição
+        # também pode reenviar fotos novas pro Cloudinary.
+        _marcar_form_em_processamento(request, 'salva_edicao_obra', segundos=12)
 
+        try:
             # 4. PREPARAÇÃO DO DICIONÁRIO DE ATUALIZAÇÃO (Campos de Texto)
             empresa_completa = f"{nome_empresa.upper()} - CNPJ - {cnpj_empresa}"
             agora_edicao = datetime.now()
-            
+
             dados_atualizados = {
                 'TIPO_OBRA': tipo_obra.upper(),
                 'SITUACAO': situacao, # Padronizado
                 'VALOR_OBRA': valor_obra,
-                'DATA_INICIO': formatar_para_db(data_inicio),
-                'CONCLUSAO_PREVISTA': formatar_para_db(conclusao_prevista),
-                'DATA_FINALIZACAO': formatar_para_db(data_finalizacao) if data_finalizacao else "—",
+                'DATA_INICIO': formatar_data_br(data_inicio),
+                'CONCLUSAO_PREVISTA': formatar_data_br(conclusao_prevista),
+                'DATA_FINALIZACAO': formatar_data_br(data_finalizacao) if data_finalizacao else "—",
                 'NOME_EMPRESA': nome_empresa, # Padronizado
                 'CNPJ_EMPRESA': cnpj_empresa,
                 'EMPRESA_CONTRATADA': empresa_completa,
@@ -875,7 +1068,7 @@ def salva_edicao_obra(request):
                     
                     # REGISTRO NO TIMELAPSE (Um documento para cada foto nova)
                     registros_historico = []
-                    data_registro_br = formatar_para_db(str(agora_edicao.date()))
+                    data_registro_br = formatar_data_br(str(agora_edicao.date()))
                     for url in urls_novas:
                         registros_historico.append({
                             'ID_OBRA': id_obra,
@@ -912,15 +1105,26 @@ def salva_edicao_obra(request):
             _disparar_em_background(atualizar_no_google_sheets, dados_para_sheets)
             _bump_cache_obras()
             messages.success(request, f"Obra {id_obra} atualizada com sucesso.")
-
-            if request.headers.get('HX-Request'):
-                return render(request, 'busca_atualiza_obra.html')
-            return render(request, 'index.html', {'template_meio': 'busca_atualiza_obra.html'})
+            # Redirect (PRG) — sem isso, um F5 depois de salvar reenviaria o POST
+            # e tentaria salvar a edição (e reenviar fotos) de novo.
+            return redirect('salva_edicao_obra')
 
         except Exception:
             logger.exception("Erro crítico ao salvar edição de obra")
             messages.error(request, "Erro inesperado ao salvar as alterações. Tente novamente.")
-            return render(request, 'busca_atualiza_obra.html') if request.headers.get('HX-Request') else render(request, 'index.html', {'template_meio': 'busca_atualiza_obra.html'})
+            return redirect('salva_edicao_obra')
+
+    # Retorno adequado para HTMX ou acesso direto (GET, ou após o redirect acima)
+    dados_repostos = request.session.pop('erro_edicao_obra', None)
+    if dados_repostos:
+        contexto_erro = {'obra': dados_repostos, 'form_token': _gerar_form_token()}
+        if request.headers.get('HX-Request'):
+            return render(request, 'edita_obra.html', contexto_erro)
+        return render(request, 'index.html', {'template_meio': 'edita_obra.html', **contexto_erro})
+
+    if request.headers.get('HX-Request'):
+        return render(request, 'busca_atualiza_obra.html')
+    return render(request, 'index.html', {'template_meio': 'busca_atualiza_obra.html'})
 
 
 
@@ -997,8 +1201,8 @@ def galeria_obra(request, id_obra):
         # 7. Renderiza o modal passando as fotos + datas
         return render(request, 'modal_galeria.html', {'fotos': fotos_com_data, 'id_obra': id_obra})
     
-    except Exception as e:
-        print(f"Erro ao carregar galeria: {e}")
+    except Exception:
+        logger.exception("Erro ao carregar galeria da obra")
         return render(request, 'modal_galeria.html', {'fotos': [], 'id_obra': id_obra})
 
 def salvar_no_google_sheets(dados):
@@ -1067,7 +1271,7 @@ def atualizar_no_google_sheets(dados):
         
         # Verifica se realmente achou a célula antes de tentar pegar a linha
         if not celula:
-            print(f"Obra ID {id_procurado} não foi encontrada na Planilha do Google.")
+            logger.warning("Obra ID %s não foi encontrada na Planilha do Google.", id_procurado)
             return False
             
         numero_da_linha = celula.row
@@ -1104,6 +1308,6 @@ def atualizar_no_google_sheets(dados):
         
         return True
         
-    except Exception as e:
-        print(f"Erro ao atualizar Google Sheets: {e}")
+    except Exception:
+        logger.exception("Erro ao atualizar Google Sheets")
         return False

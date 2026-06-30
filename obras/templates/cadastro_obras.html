@@ -23,9 +23,10 @@
             hx-indicator="#btn-salvar"
             hx-confirm="Confirma o cadastro desta obra?">
         {% csrf_token %}
+        <input type="hidden" name="form_token" value="{{ form_token }}">
 
         <div class="form-grid">
-          
+
           <div class="field">
             <label>ID da Obra (Opcional)</label>
             <input value="{{ dados.ID_OBRA_MANUAL|default:'' }}" 

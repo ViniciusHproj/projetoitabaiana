@@ -23,6 +23,7 @@
 
       <form hx-post="{% url 'cadastro_funcionario' %}" hx-target="#conteudo-dinamico" hx-swap="innerHTML" hx-indicator="#btn-salvar" hx-confirm="Confirma o cadastro deste funcionário?">
         {% csrf_token %}
+        <input type="hidden" name="form_token" value="{{ form_token }}">
 
         <div id="aba-dados">
           <div class="form-grid">

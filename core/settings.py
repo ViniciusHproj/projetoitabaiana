@@ -161,6 +161,22 @@ SESSION_SAVE_EVERY_REQUEST = True
 
 # Garante que, se ele fechar o navegador, a sessão também seja encerrada por segurança.
 SESSION_EXPIRE_AT_BROWSER_CLOSE = True
+
+# --- SEGURANÇA DE TRANSPORTE (HTTPS) ---
+# Só ativado quando DEBUG=False (produção/Render), para não quebrar o
+# runserver local em HTTP. O Render termina o TLS no proxy reverso dele e
+# repassa pra aplicação por HTTP interno — por isso SECURE_PROXY_SSL_HEADER
+# é necessário pro Django reconhecer X-Forwarded-Proto e não entrar em loop
+# de redirect.
+if not DEBUG:
+    SECURE_SSL_REDIRECT = True
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_HSTS_SECONDS = 31536000  # 1 ano
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+
 # Configuração do Cloudinary para o upload de imagens
 cloudinary.config(
   cloud_name = os.environ['CLOUDINARY_CLOUD_NAME'],

@@ -24,6 +24,7 @@
 
     <form hx-post="{% url 'salva_edicao_funcionario' %}" hx-target="#conteudo-dinamico" hx-indicator="#btn-salvar-alteracoes" hx-confirm="Confirma as alterações deste funcionário?">
       {% csrf_token %}
+      <input type="hidden" name="form_token" value="{{ form_token }}">
       <input type="hidden" name="CPF_ORIGINAL" value="{{ funcionario.CPF }}">
 
       <div id="aba-dados-edit">
