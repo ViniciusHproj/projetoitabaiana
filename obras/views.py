@@ -1,6 +1,7 @@
 import os
 import logging
 import threading
+import time
 import gspread
 from google.oauth2.service_account import Credentials as GoogleServiceAccountCredentials
 from django.shortcuts import render, redirect
@@ -26,17 +27,37 @@ from obras.utils import formatar_data_br, preparar_data_para_input
 logger = logging.getLogger(__name__)
 
 
+TENTATIVAS_BACKGROUND = 3
+ESPERA_BACKGROUND_SEGUNDOS = (5, 15)  # espera antes da 2ª e da 3ª tentativa
+
+
 def _disparar_em_background(funcao, *args, **kwargs):
     """
     Executa uma chamada de rede "melhor esforço" (ex: Google Sheets) numa thread
-    separada, sem bloquear a resposta ao usuário. Falhas são apenas logadas —
-    o Mongo já é a fonte de verdade, a planilha é só espelhamento.
+    separada, sem bloquear a resposta ao usuário. O Mongo já é a fonte de
+    verdade, a planilha é só espelhamento — por isso falhas nunca sobem para o
+    usuário. Tenta algumas vezes com espera crescente antes de desistir, pois
+    falhas de rede/API do Google costumam ser passageiras; se todas as
+    tentativas falharem, a falha é apenas logada (sem fila/retry persistente).
     """
     def _executar():
-        try:
-            funcao(*args, **kwargs)
-        except Exception:
-            logger.exception("Erro ao executar tarefa em segundo plano: %s", funcao.__name__)
+        for tentativa in range(1, TENTATIVAS_BACKGROUND + 1):
+            try:
+                funcao(*args, **kwargs)
+                return
+            except Exception:
+                if tentativa < TENTATIVAS_BACKGROUND:
+                    logger.warning(
+                        "Tentativa %s/%s falhou para tarefa em segundo plano %s — tentando de novo em %ss.",
+                        tentativa, TENTATIVAS_BACKGROUND, funcao.__name__,
+                        ESPERA_BACKGROUND_SEGUNDOS[tentativa - 1], exc_info=True
+                    )
+                    time.sleep(ESPERA_BACKGROUND_SEGUNDOS[tentativa - 1])
+                else:
+                    logger.exception(
+                        "Erro ao executar tarefa em segundo plano após %s tentativas: %s",
+                        TENTATIVAS_BACKGROUND, funcao.__name__
+                    )
 
     threading.Thread(target=_executar, daemon=True).start()
 

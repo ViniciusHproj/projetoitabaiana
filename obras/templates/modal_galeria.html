@@ -45,7 +45,12 @@
         const lb = document.createElement('div');
         lb.id = 'lightbox-fullscreen';
         lb.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.95);z-index:10000;display:flex;align-items:center;justify-content:center;cursor:zoom-out;';
-        lb.innerHTML = '<img src="' + src + '" style="max-width:90%;max-height:90vh;border-radius:6px;object-fit:contain;box-shadow:0 0 40px rgba(0,0,0,0.8);">';
+
+        const img = document.createElement('img');
+        img.src = src;
+        img.style.cssText = 'max-width:90%;max-height:90vh;border-radius:6px;object-fit:contain;box-shadow:0 0 40px rgba(0,0,0,0.8);';
+        lb.appendChild(img);
+
         lb.addEventListener('click', function() { lb.remove(); });
         document.addEventListener('keydown', function(e) {
             if (e.key === 'Escape') lb.remove();
