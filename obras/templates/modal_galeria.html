@@ -53,7 +53,10 @@
 
         lb.addEventListener('click', function() { lb.remove(); });
         document.addEventListener('keydown', function(e) {
-            if (e.key === 'Escape') lb.remove();
+            if (e.key === 'Escape') {
+                e.stopImmediatePropagation();
+                lb.remove();
+            }
         }, { once: true });
         document.body.appendChild(lb);
     }

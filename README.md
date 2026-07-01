@@ -89,8 +89,6 @@ python manage.py runserver
 
 O projeto estará disponível em `http://127.0.0.1:8000/`.
 
-> **Atenção:** `python manage.py migrate` está atualmente quebrado nesse projeto (incompatibilidade entre `django-mongodb-backend` e Django 6.0.4 ao criar permissões). Isso não impede o uso normal se o banco já existir com as coleções de auth/sessão criadas, mas bloqueia inicializar um banco novo do zero. Veja a seção de Problemas Conhecidos.
-
 ### Criar um usuário administrador
 
 ```powershell
@@ -143,8 +141,17 @@ git push origin main
 
 ---
 
+## Testes automatizados
+
+```powershell
+python manage.py test obras
+```
+
+A suíte cobre validadores (CPF/CNPJ/RG/datas/valor), a correção de segurança do IP via `X-Forwarded-For`, rate-limit de login, sessão única por usuário, e os fluxos de cadastro/edição de obras e funcionários. Requer conectividade real com o MongoDB do `.env` — os testes usam um banco de teste à parte no mesmo cluster (`{MONGODB_DB_NAME}_teste`), criado e destruído automaticamente a cada execução; nada é gravado no banco de produção. Upload de fotos (Cloudinary) é mockado, então não precisa de credenciais reais do Cloudinary para rodar os testes.
+
+---
+
 ## Problemas conhecidos
 
-- `manage.py migrate` quebra ao criar permissões (incompatibilidade `django-mongodb-backend` + Django 6.0.4). Não impede o uso normal de um banco já existente.
-- Não há suíte de testes automatizados — mudanças são verificadas manualmente (`manage.py check` + testes funcionais ad hoc).
 - O cache de listagem de obras (`LocMemCache`) é por processo — o Render precisa rodar com 1 único worker (`WEB_CONCURRENCY=1`) para a invalidação de cache funcionar corretamente.
+- A sincronização com Google Sheets roda em segundo plano com até 3 tentativas (5s, 15s de espera); se todas falharem, a obra fica salva no Mongo mas não aparece na planilha até a próxima edição.

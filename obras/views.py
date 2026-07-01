@@ -119,6 +119,13 @@ try:
 except Exception:
     logger.exception("Não foi possível garantir o índice TTL em Banco_SegurancaLogin")
 
+try:
+    # TTL index: remove registros de sessão ativa de usuários que não fazem
+    # login há mais de 90 dias — mantém a coleção higienizada sem cleanup manual.
+    colecao_sessoes_ativas.create_index('atualizado_em', expireAfterSeconds=90 * 24 * 3600)
+except Exception:
+    logger.exception("Não foi possível garantir o índice TTL em Banco_SessoesAtivas")
+
 GOOGLE_SHEETS_CREDENTIALS_FILE = os.environ.get('GOOGLE_SHEETS_CREDENTIALS_FILE', 'credenciais.json')
 GOOGLE_SHEETS_SPREADSHEET_NAME = os.environ.get('GOOGLE_SHEETS_SPREADSHEET_NAME', 'Data base OBRAS DE ITABIANA')
 
@@ -328,7 +335,7 @@ def data_e_valida(data_str, tipo="geral"):
 
         # Regra 2: Para funcionários (Não pode nascer no futuro e limite de 120 anos)
         if tipo == "nascimento":
-            if data_obj.year > ano_atual or (ano_atual - data_obj.year) > 120:
+            if data_obj > datetime.today().date() or (ano_atual - data_obj.year) > 120:
                 return False
                 
         # Regra 3: Para obras (Não devem ultrapassar um limite absurdo de prazo)
@@ -470,7 +477,11 @@ def login_view(request):
             system_messages.used = True
 
             # 3. Agora sim, cria a mensagem única de boas-vindas
-            nome_usuario = user.first_name.split()[0].title()
+            # Todo funcionário cadastrado por cadastro_funcionario tem first_name
+            # preenchido, mas contas criadas fora desse fluxo (ex: createsuperuser)
+            # podem não ter — sem esse fallback, o login quebrava com IndexError.
+            partes_nome = (user.first_name or "").split()
+            nome_usuario = partes_nome[0].title() if partes_nome else user.username
             funcao = "Supervisor" if user.is_staff else "Funcionário Comum"
             messages.success(request, f"Autenticado com sucesso. Bem-vindo, {nome_usuario} ({funcao}).")
 
@@ -517,7 +528,7 @@ def staff_required(view_func):
         from django.urls import reverse as _reverse
         if not request.user.is_authenticated:
             return redirect(f"{_reverse('login')}?next={request.path}")
-        if not request.user.is_staff:
+        if not (request.user.is_staff or request.user.is_superuser):
             messages.error(request, "Acesso não autorizado. Esta área é restrita a supervisores.")
             return redirect('inicio')
         return view_func(request, *args, **kwargs)
@@ -541,7 +552,7 @@ def cadastro_funcionario(request):
         return redirect(f'/login/?next={request.path}')
 
     # 2. Bloqueio para quem está logado mas é COMUM (não é staff)
-    if not request.user.is_staff:
+    if not (request.user.is_staff or request.user.is_superuser):
         messages.error(request, "Acesso negado. Esta área é exclusiva para supervisores.")
         return redirect('inicio')
         
@@ -593,6 +604,23 @@ def cadastro_funcionario(request):
             # Chama a função validadora que criamos no topo do views.py
             if not data_e_valida(data_nasc_str, tipo="nascimento"):
                 return _render_cadastro_func("A data de nascimento informada é inválida ou irreal.")
+
+            # Verifica idade mínima: 18 anos para Supervisor, 16 para Comum.
+            _nasc = datetime.strptime(data_nasc_str, '%Y-%m-%d').date()
+            _hoje = datetime.today().date()
+            _idade = _hoje.year - _nasc.year - ((_hoje.month, _hoje.day) < (_nasc.month, _nasc.day))
+            _nivel = documento_funcionario.get('NIVEL_ACESSO', '')
+            if _nivel == 'SUPERVISOR' and _idade < 18:
+                return _render_cadastro_func("Supervisores devem ter no mínimo 18 anos.")
+            if _nivel == 'COMUM' and _idade < 16:
+                return _render_cadastro_func("Funcionários devem ter no mínimo 16 anos.")
+
+            # Validação do nível de acesso — deve ser um dos dois valores aceitos.
+            # Sem isso, um valor arbitrário como "GERENTE" passaria pela validação,
+            # seria salvo como FUNCAO no MongoDB e o usuário ficaria como COMUM no Django.
+            NIVEIS_VALIDOS = {'SUPERVISOR', 'COMUM'}
+            if _nivel not in NIVEIS_VALIDOS:
+                return _render_cadastro_func("O nível de acesso selecionado é inválido.")
             # ==========================================
 
             # ==========================================
@@ -695,14 +723,20 @@ def busca_atualiza_funcionario(request):
         return redirect(f'/login/?next={request.path}')
 
     # 2. Bloqueio para quem está logado mas é COMUM (não é staff)
-    if not request.user.is_staff:
+    if not (request.user.is_staff or request.user.is_superuser):
         messages.error(request, "Acesso negado. Esta área é exclusiva para supervisores.")
         return redirect('inicio')
     # Lógica para o POST (Quando o usuário clica em "Buscar")
     if request.method == 'POST':
         cpf_pesquisado = request.POST.get('CPF', '').strip()
         cpf_limpo = cpf_pesquisado.replace('.', '').replace('-', '')
-            
+
+        if not cpf_limpo or not cpf_limpo.isdigit():
+            messages.error(request, "Informe um CPF válido para buscar.")
+            if request.headers.get('HX-Request'):
+                return render(request, 'busca_atualiza_funcionario.html')
+            return render(request, 'index.html', {'template_meio': 'busca_atualiza_funcionario.html'})
+
         funcionario = colecao_funcionarios.find_one({'CPF': cpf_limpo})
 
         if funcionario:
@@ -711,7 +745,12 @@ def busca_atualiza_funcionario(request):
             if data_nasc and '/' in data_nasc:
                 d, m, a = data_nasc.split('/')
                 funcionario['DATA_NASCIMENTO'] = f"{a}-{m}-{d}"
-            
+
+            # Registra qual CPF está autorizado a ser editado nesta sessão —
+            # salva_edicao_funcionario verifica este valor para impedir que o
+            # formulário seja forjado para editar um CPF diferente do buscado.
+            request.session['cpf_editando'] = cpf_limpo
+
             contexto = {'funcionario': funcionario, 'form_token': _gerar_form_token()}
 
             # Se for HTMX, manda só o formulário de edição
@@ -748,7 +787,7 @@ def salva_edicao_funcionario(request):
         return redirect(f'/login/?next={request.path}')
 
     # 2. Bloqueio para quem está logado mas é COMUM (não é staff)
-    if not request.user.is_staff:
+    if not (request.user.is_staff or request.user.is_superuser):
         messages.error(request, "Acesso negado. Esta área é exclusiva para supervisores.")
         return redirect('inicio')
 
@@ -775,7 +814,15 @@ def salva_edicao_funcionario(request):
             request.session['erro_edicao_funcionario'] = _dados_para_repor(request)
             return redirect('salva_edicao_funcionario')
 
-        cpf_original = request.POST.get('CPF_ORIGINAL')
+        cpf_original = request.POST.get('CPF_ORIGINAL', '').strip()
+
+        # Verifica que o CPF sendo editado é o mesmo que foi buscado nesta sessão —
+        # impede que um supervisor forje o campo oculto para editar/tomar conta de
+        # outro funcionário sem ter passado pela tela de busca daquele CPF.
+        cpf_autorizado = request.session.get('cpf_editando', '')
+        if not cpf_original or cpf_original != cpf_autorizado:
+            messages.error(request, "Sessão de edição inválida. Refaça a busca do funcionário.")
+            return redirect('busca_atualiza_funcionario')
 
         # 1. COLETA E LIMPEZA INICIAL DOS DADOS
         nome_novo = request.POST.get('NOME', '').strip()
@@ -799,6 +846,19 @@ def salva_edicao_funcionario(request):
         # ==========================================
         if not data_e_valida(data_input, tipo="nascimento"):
             messages.warning(request, "A data de nascimento informada é inválida ou irreal.")
+            request.session['erro_edicao_funcionario'] = _dados_para_repor(request)
+            return redirect('salva_edicao_funcionario')
+
+        # Verifica idade mínima: 18 anos para Supervisor, 16 para Comum.
+        _nasc = datetime.strptime(data_input, '%Y-%m-%d').date()
+        _hoje = datetime.today().date()
+        _idade = _hoje.year - _nasc.year - ((_hoje.month, _hoje.day) < (_nasc.month, _nasc.day))
+        if funcao_nova.upper() == 'SUPERVISOR' and _idade < 18:
+            messages.warning(request, "Supervisores devem ter no mínimo 18 anos.")
+            request.session['erro_edicao_funcionario'] = _dados_para_repor(request)
+            return redirect('salva_edicao_funcionario')
+        if funcao_nova.upper() == 'COMUM' and _idade < 16:
+            messages.warning(request, "Funcionários devem ter no mínimo 16 anos.")
             request.session['erro_edicao_funcionario'] = _dados_para_repor(request)
             return redirect('salva_edicao_funcionario')
         # ==========================================
@@ -853,41 +913,58 @@ def salva_edicao_funcionario(request):
         nome_novo = nome_novo.upper()
         rg_limpo = rg_novo.replace('.', '').replace('-', '')
 
+        # Recalcula IDADE a partir da nova data de nascimento para manter consistência.
+        data_nasc_obj = datetime.strptime(data_input, '%Y-%m-%d').date()
+        hoje = datetime.today().date()
+        idade_nova = hoje.year - data_nasc_obj.year - ((hoje.month, hoje.day) < (data_nasc_obj.month, data_nasc_obj.day))
+
         dados_atualizados_mongo = {
             'NOME': nome_novo,
             'DATA_NASCIMENTO': data_br,
             'RG': rg_limpo,
             'FUNCAO': funcao_nova,
+            'IDADE': idade_nova,
         }
 
         # 5. ATUALIZAÇÃO NA TABELA DE AUTENTICAÇÃO (DJANGO)
         try:
-            # Localiza o usuário no Django pelo CPF (username)
             usuario_django = User.objects.get(username=cpf_original)
-            
-            # Atualiza o Nome
-            usuario_django.first_name = nome_novo
-            
-            # Atualiza o Nível de Acesso (Staff) baseado na Função
-            if funcao_nova == 'SUPERVISOR':
-                usuario_django.is_staff = True
-            else:
-                usuario_django.is_staff = False
-            
-            # Atualiza a senha apenas se foi digitada
-            nova_senha = request.POST.get('SENHA')
-            if nova_senha and nova_senha.strip() != "":
-                usuario_django.set_password(nova_senha) # O set_password já faz o hash automático!
-            
-            usuario_django.save()
-
         except User.DoesNotExist:
             messages.error(request, "Usuário não encontrado na tabela de autenticação.")
+            request.session['erro_edicao_funcionario'] = _dados_para_repor(request)
             return redirect('salva_edicao_funcionario')
 
+        # Guarda estado original para rollback caso o MongoDB falhe depois.
+        _nome_original = usuario_django.first_name
+        _staff_original = usuario_django.is_staff
+        _password_original = usuario_django.password
+
+        usuario_django.first_name = nome_novo
+        usuario_django.is_staff = (funcao_nova == 'SUPERVISOR')
+
+        # Reutiliza a senha já validada acima — evita re-leitura do POST.
+        if nova_senha_digitada.strip():
+            usuario_django.set_password(nova_senha_digitada)
+
+        usuario_django.save()
+
         # 6. ATUALIZAÇÃO NO MONGODB
-        # Nota: Não salvamos a senha no Mongo, conforme sua lógica anterior
-        colecao_funcionarios.update_one({'CPF': cpf_original}, {'$set': dados_atualizados_mongo})
+        # Se falhar, reverte o Django para evitar que os dois bancos fiquem
+        # em estados divergentes permanentemente.
+        try:
+            colecao_funcionarios.update_one({'CPF': cpf_original}, {'$set': dados_atualizados_mongo})
+        except Exception:
+            try:
+                usuario_django.first_name = _nome_original
+                usuario_django.is_staff = _staff_original
+                usuario_django.password = _password_original
+                usuario_django.save(update_fields=['first_name', 'is_staff', 'password'])
+            except Exception:
+                logger.exception(
+                    "CRÍTICO: falha ao fazer rollback do Django após erro no MongoDB "
+                    "— estados divergentes para CPF=%s", cpf_original
+                )
+            raise
 
         messages.success(request, f"Dados de {nome_novo} atualizados com sucesso.")
         # Redirect (PRG) — sem isso, um F5 depois de salvar reenviaria o POST
@@ -953,8 +1030,12 @@ def cadastro_obras(request):
             tipo_execucao, endereco
         ]
 
+        MAX_FOTOS = 10
         if any(not campo for campo in campos_obrigatorios) or not fotos_arquivos:
             return _render_cadastro("Preencha todos os campos obrigatórios e envie pelo menos uma foto da obra.")
+
+        if len(fotos_arquivos) > MAX_FOTOS:
+            return _render_cadastro(f"Envie no máximo {MAX_FOTOS} fotos por cadastro.")
 
         if not validar_cnpj(cnpj_empresa.replace('.', '').replace('/', '').replace('-', '')):
             return _render_cadastro("O CNPJ informado é inválido.")
@@ -1180,6 +1261,10 @@ def salva_edicao_obra(request):
         if any(not campo for campo in campos_obrigatorios):
             return _render_edicao("Preencha todos os campos obrigatórios antes de salvar.")
 
+        MAX_FOTOS = 10
+        if len(fotos_novas_arquivos) > MAX_FOTOS:
+            return _render_edicao(f"Envie no máximo {MAX_FOTOS} fotos por vez.")
+
         if not validar_cnpj(cnpj_empresa.replace('.', '').replace('/', '').replace('-', '')):
             return _render_edicao("O CNPJ informado é inválido.")
 
@@ -1216,6 +1301,11 @@ def salva_edicao_obra(request):
         # também pode reenviar fotos novas pro Cloudinary.
         _marcar_form_em_processamento(request, 'salva_edicao_obra', segundos=12)
 
+        # Verifica que a obra realmente existe antes de qualquer trabalho —
+        # update_one sem match silencioso retornaria sucesso sem salvar nada.
+        if not colecao_obras.find_one({'ID_OBRA': id_obra}, {'_id': 1}):
+            return _render_edicao(f"Obra {id_obra} não encontrada. Refaça a busca.")
+
         try:
             # 4. PREPARAÇÃO DO DICIONÁRIO DE ATUALIZAÇÃO (Campos de Texto)
             empresa_completa = f"{nome_empresa.upper()} - CNPJ - {cnpj_empresa}"
@@ -1244,16 +1334,17 @@ def salva_edicao_obra(request):
             # 6. PROCESSAMENTO DAS NOVAS FOTOS (Se houver)
             # ==========================================
             urls_novas = []
+            erro_foto = False
             if fotos_novas_arquivos:
                 try:
                     for foto in fotos_novas_arquivos:
                         resultado_upload = cloudinary.uploader.upload(foto, folder="obras_projeto")
                         url_url = resultado_upload.get('secure_url')
                         urls_novas.append(url_url)
-                    
+
                     # Atualizamos a CAPA da obra para a primeira das novas fotos enviadas
                     dados_atualizados['URL_FOTO'] = urls_novas[0]
-                    
+
                     # REGISTRO NO TIMELAPSE (Um documento para cada foto nova)
                     registros_historico = []
                     data_registro_br = formatar_data_br(str(agora_edicao.date()))
@@ -1261,15 +1352,15 @@ def salva_edicao_obra(request):
                         registros_historico.append({
                             'ID_OBRA': id_obra,
                             'URL_FOTO': url,
-                            'SITUACAO': situacao, # Padronizado (sem o .upper())
+                            'SITUACAO': situacao,
                             'DATA_REGISTRO': data_registro_br,
                             'TIMESTAMP': agora_edicao
                         })
                     colecao_historico.insert_many(registros_historico)
-                    
+
                 except Exception:
                     logger.exception("Erro ao processar imagens da obra")
-                    messages.error(request, "Erro ao processar as imagens enviadas.")
+                    erro_foto = True
 
             # ==========================================
             # 7. EXECUTANDO OS UPDATES NO MONGODB
@@ -1292,9 +1383,10 @@ def salva_edicao_obra(request):
             dados_para_sheets['ID_OBRA'] = id_obra
             _disparar_em_background(atualizar_no_google_sheets, dados_para_sheets)
             _bump_cache_obras()
-            messages.success(request, f"Obra {id_obra} atualizada com sucesso.")
-            # Redirect (PRG) — sem isso, um F5 depois de salvar reenviaria o POST
-            # e tentaria salvar a edição (e reenviar fotos) de novo.
+            if erro_foto:
+                messages.warning(request, f"Obra {id_obra} atualizada, mas houve erro ao processar as novas imagens. Tente enviar as fotos novamente.")
+            else:
+                messages.success(request, f"Obra {id_obra} atualizada com sucesso.")
             return redirect('salva_edicao_obra')
 
         except Exception:
@@ -1442,60 +1534,37 @@ def salvar_no_google_sheets(dados):
     return "CRIADA"
 
 def atualizar_no_google_sheets(dados):
-    try:
-        # 1. Configura as credenciais
-        scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-        creds = GoogleServiceAccountCredentials.from_service_account_file(GOOGLE_SHEETS_CREDENTIALS_FILE, scopes=scope)
-        client = gspread.authorize(creds)
+    # Sem try/except externo — exceções propagam para _disparar_em_background,
+    # que retenta a chamada até TENTATIVAS_BACKGROUND vezes. Espelha o padrão
+    # de salvar_no_google_sheets.
+    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+    creds = GoogleServiceAccountCredentials.from_service_account_file(GOOGLE_SHEETS_CREDENTIALS_FILE, scopes=scope)
+    client = gspread.authorize(creds)
 
-        # 2. Abre a planilha
-        planilha = client.open(GOOGLE_SHEETS_SPREADSHEET_NAME).sheet1
+    planilha = client.open(GOOGLE_SHEETS_SPREADSHEET_NAME).sheet1
 
-        # ID que vamos procurar na planilha
-        id_procurado = str(dados.get('ID_OBRA'))
-        
-        # 3. Procura a célula (O gspread novo retorna None se não achar)
-        celula = planilha.find(id_procurado, in_column=1)
-        
-        # Verifica se realmente achou a célula antes de tentar pegar a linha
-        if not celula:
-            logger.warning("Obra ID %s não foi encontrada na Planilha do Google.", id_procurado)
-            return False
-            
-        numero_da_linha = celula.row
-        
-        # 4. Prepara os dados formatados (Fiel à imagem da planilha)
-        linha_atualizada = [
-            dados.get('ID_OBRA'),
-            dados.get('VALOR_OBRA'), # Valor apenas em números, sem R$
-            dados.get('DATA_INICIO'),
-            dados.get('CONCLUSAO_PREVISTA'),
-            dados.get('DATA_FINALIZACAO'),
-            
-            # Sem capitalize para manter o padrão "Nova Construção", "Reforma", etc.
-            dados.get('TIPO_EXECUCAO'), 
-            
-            # Sempre Maiúsculo
-            dados.get('TIPO_OBRA').upper() if dados.get('TIPO_OBRA') else '',
-            
-            # Sem capitalize para manter o padrão "Em andamento", "Cancelada", etc.
-            dados.get('SITUACAO'), 
-            
-            # Sempre Maiúsculo
-            dados.get('EMPRESA_CONTRATADA').upper() if dados.get('EMPRESA_CONTRATADA') else '',
-            
-            # Sempre Maiúsculo
-            dados.get('ENDERECO').upper() if dados.get('ENDERECO') else ''
-        ]
+    id_procurado = str(dados.get('ID_OBRA'))
+    celula = planilha.find(id_procurado, in_column=1)
 
-        # 5. Atualiza a linha específica na planilha
-        intervalo = f'A{numero_da_linha}:J{numero_da_linha}'
-        
-        # Sobrescreve apenas a linha encontrada
-        planilha.update(values=[linha_atualizada], range_name=intervalo)
-        
-        return True
-        
-    except Exception:
-        logger.exception("Erro ao atualizar Google Sheets")
+    if not celula:
+        logger.warning("Obra ID %s não foi encontrada na Planilha do Google.", id_procurado)
         return False
+
+    numero_da_linha = celula.row
+
+    linha_atualizada = [
+        dados.get('ID_OBRA'),
+        dados.get('VALOR_OBRA'),
+        dados.get('DATA_INICIO'),
+        dados.get('CONCLUSAO_PREVISTA'),
+        dados.get('DATA_FINALIZACAO'),
+        dados.get('TIPO_EXECUCAO'),
+        dados.get('TIPO_OBRA').upper() if dados.get('TIPO_OBRA') else '',
+        dados.get('SITUACAO'),
+        dados.get('EMPRESA_CONTRATADA').upper() if dados.get('EMPRESA_CONTRATADA') else '',
+        dados.get('ENDERECO').upper() if dados.get('ENDERECO') else '',
+    ]
+
+    intervalo = f'A{numero_da_linha}:J{numero_da_linha}'
+    planilha.update(values=[linha_atualizada], range_name=intervalo)
+    return True
