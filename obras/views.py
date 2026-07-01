@@ -2,7 +2,7 @@ import os
 import logging
 import threading
 import gspread
-from oauth2client.service_account import ServiceAccountCredentials
+from google.oauth2.service_account import Credentials as GoogleServiceAccountCredentials
 from django.shortcuts import render, redirect
 from pymongo import MongoClient
 from pymongo.errors import DuplicateKeyError
@@ -12,11 +12,14 @@ import ntplib
 import uuid
 from datetime import datetime, timedelta
 from django.contrib.auth.models import User
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
 import cloudinary.uploader
 from functools import wraps
 from django.contrib.auth import authenticate, login as auth_login
 from django.contrib.auth import logout as auth_logout
-from django.contrib.messages import get_messages # Adicione este import no topo
+from django.contrib.messages import get_messages
+from django.utils.http import url_has_allowed_host_and_scheme
 from obras.utils import formatar_data_br, preparar_data_para_input
 # Create your views here.
 
@@ -113,11 +116,17 @@ LOGIN_BLOQUEIOS_PARA_ALERTA = 3  # nº de bloqueios na mesma conta em 24h que di
 
 def _ip_do_cliente(request):
     """Pega o IP real do request. Em produção (Render) o tráfego passa por um
-    proxy reverso, que define X-Forwarded-For — sem isso, REMOTE_ADDR seria
-    sempre o IP do proxy, não do usuário, e o rate limit nunca bloquearia ninguém."""
+    único proxy reverso confiável, que ACRESCENTA o IP real do cliente ao
+    final de X-Forwarded-For antes de repassar a requisição — sem isso,
+    REMOTE_ADDR seria sempre o IP do proxy, não do usuário, e o rate limit
+    nunca bloquearia ninguém. Usamos o ÚLTIMO valor da lista (o mais próximo
+    do servidor, escrito pelo proxy), nunca o primeiro: o primeiro valor é
+    fornecido pelo próprio cliente e pode ser forjado livremente por um
+    atacante para burlar o bloqueio por IP (cada tentativa com um
+    X-Forwarded-For falso diferente cairia numa chave de rate-limit nova)."""
     encaminhado = request.META.get('HTTP_X_FORWARDED_FOR')
     if encaminhado:
-        return encaminhado.split(',')[0].strip()
+        return encaminhado.split(',')[-1].strip()
     return request.META.get('REMOTE_ADDR', 'desconhecido')
 
 
@@ -263,9 +272,10 @@ def _token_ja_usado(token):
     """Idempotência por token: cada carregamento do formulário recebe um
     token único (campo oculto). Se o mesmo token chegar duas vezes — duplo
     clique, segunda aba, replay de request — a segunda é rejeitada, mesmo
-    que venha rápido o suficiente para escapar da trava de tempo acima."""
+    que venha rápido o suficiente para escapar da trava de tempo acima.
+    Token ausente é tratado como inválido: sem token não há idempotência."""
     if not token:
-        return False  # sem token (ex: chamada antiga/externa) não bloqueia, só não protege
+        return True  # POST sem token = envio inválido/forjado, rejeita
     chave = f'form_token_{token}'
     if cache.get(chave):
         return True
@@ -443,8 +453,14 @@ def login_view(request):
             funcao = "Supervisor" if user.is_staff else "Funcionário Comum"
             messages.success(request, f"Autenticado com sucesso. Bem-vindo, {nome_usuario} ({funcao}).")
 
-            proxima_pagina = request.GET.get('next', 'inicio')
-            return redirect(proxima_pagina)
+            proxima_raw = request.GET.get('next', '')
+            if proxima_raw and url_has_allowed_host_and_scheme(
+                proxima_raw,
+                allowed_hosts={request.get_host()},
+                require_https=request.is_secure(),
+            ):
+                return redirect(proxima_raw)
+            return redirect('inicio')
         else:
             _registrar_tentativa_falha_login(request, chave_ip, chave_cpf, usuario_cpf)
             restantes = _tentativas_restantes(chave_ip, chave_cpf)
@@ -464,25 +480,25 @@ def login_view(request):
 
     return render(request, 'login.html')
 def logout_view(request):
-    motivo = request.GET.get('motivo', '')
+    if request.method != 'POST':
+        from django.http import HttpResponseNotAllowed
+        return HttpResponseNotAllowed(['POST'])
+    motivo = request.POST.get('motivo', '')
     if request.user.is_authenticated:
         auth_logout(request)
     if motivo == 'inatividade':
-        return redirect(f"/login/?aviso=inatividade")
-    return redirect(f"/login/?aviso=saiu")
+        return redirect('/login/?aviso=inatividade')
+    return redirect('/login/?aviso=saiu')
 
 def staff_required(view_func):
     @wraps(view_func)
     def _wrapped_view(request, *args, **kwargs):
-        # 1. Se não está logado, manda pro login (comportamento normal)
+        from django.urls import reverse as _reverse
         if not request.user.is_authenticated:
-            return redirect(f'/?next={request.path}')
-        
-        # 2. Se está logado MAS não é STAFF, manda pro início com ERRO
+            return redirect(f"{_reverse('login')}?next={request.path}")
         if not request.user.is_staff:
             messages.error(request, "Acesso não autorizado. Esta área é restrita a supervisores.")
-            return redirect('inicio') # Redireciona para a rota do Dashboard
-            
+            return redirect('inicio')
         return view_func(request, *args, **kwargs)
     return _wrapped_view
 def eh_supervisor(user):
@@ -513,7 +529,10 @@ def cadastro_funcionario(request):
         # Guarda os campos digitados na sessão (não dá pra repor depois de um
         # redirect de outra forma) e redireciona — em vez de devolver a página
         # direto do POST, o que faria o navegador reenviar o formulário a cada F5.
-        request.session['erro_cadastro_funcionario'] = request.POST.dict()
+        # SENHA é excluída: nunca deve ficar em plaintext na sessão (MongoDB).
+        dados = request.POST.dict()
+        dados.pop('SENHA', None)
+        request.session['erro_cadastro_funcionario'] = dados
         return redirect('cadastro_funcionario')
 
     if request.method == 'POST' and 'btn-salvar' in request.POST:
@@ -570,6 +589,19 @@ def cadastro_funcionario(request):
 
             if not texto_tem_letra(documento_funcionario['NOME']):
                 return _render_cadastro_func("O Nome informado é inválido.")
+            # ==========================================
+
+            # ==========================================
+            # 2.8 TRAVA DE SEGURANÇA DA SENHA (AUTH_PASSWORD_VALIDATORS)
+            # ==========================================
+            # create_user() NÃO aplica AUTH_PASSWORD_VALIDATORS sozinho — isso só
+            # acontece em formulários prontos do Django. Sem chamar validate_password
+            # explicitamente aqui, a política de senha configurada em settings.py
+            # nunca seria realmente aplicada.
+            try:
+                validate_password(documento_funcionario['SENHA'])
+            except DjangoValidationError as erro:
+                return _render_cadastro_func(" ".join(erro.messages))
             # ==========================================
 
             # 3. VERIFICAÇÃO DE DUPLICIDADE (Evita crash no Django)
@@ -764,6 +796,32 @@ def salva_edicao_funcionario(request):
             return redirect('salva_edicao_funcionario')
         # ==========================================
 
+        # ==========================================
+        # 2.7 TRAVA DE SEGURANÇA DA FUNÇÃO
+        # ==========================================
+        FUNCOES_VALIDAS = {'SUPERVISOR', 'COMUM'}
+        if funcao_nova.upper() not in FUNCOES_VALIDAS:
+            messages.warning(request, "A função selecionada é inválida.")
+            request.session['erro_edicao_funcionario'] = _dados_para_repor(request)
+            return redirect('salva_edicao_funcionario')
+        funcao_nova = funcao_nova.upper()
+        # ==========================================
+
+        # ==========================================
+        # 2.8 TRAVA DE SEGURANÇA DA SENHA (AUTH_PASSWORD_VALIDATORS)
+        # ==========================================
+        # set_password() NÃO aplica AUTH_PASSWORD_VALIDATORS sozinho — só valida
+        # se uma nova senha foi de fato digitada (campo vazio = manter a atual).
+        nova_senha_digitada = request.POST.get('SENHA', '')
+        if nova_senha_digitada.strip():
+            try:
+                validate_password(nova_senha_digitada)
+            except DjangoValidationError as erro:
+                messages.warning(request, " ".join(erro.messages))
+                request.session['erro_edicao_funcionario'] = _dados_para_repor(request)
+                return redirect('salva_edicao_funcionario')
+        # ==========================================
+
         # Só trava contra duplo submit agora que passamos por todas as validações.
         _marcar_form_em_processamento(request, 'salva_edicao_funcionario')
 
@@ -772,7 +830,6 @@ def salva_edicao_funcionario(request):
 
         # 4. Prepara os dados para o MongoDB
         nome_novo = nome_novo.upper()
-        funcao_nova = funcao_nova.upper()
         rg_limpo = rg_novo.replace('.', '').replace('-', '')
 
         dados_atualizados_mongo = {
@@ -1318,7 +1375,7 @@ def galeria_obra(request, id_obra):
 def salvar_no_google_sheets(dados):
     # 1. Configura as credenciais
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-    creds = ServiceAccountCredentials.from_json_keyfile_name(GOOGLE_SHEETS_CREDENTIALS_FILE, scope)
+    creds = GoogleServiceAccountCredentials.from_service_account_file(GOOGLE_SHEETS_CREDENTIALS_FILE, scopes=scope)
     client = gspread.authorize(creds)
 
     # 2. Abre a planilha
@@ -1367,7 +1424,7 @@ def atualizar_no_google_sheets(dados):
     try:
         # 1. Configura as credenciais
         scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-        creds = ServiceAccountCredentials.from_json_keyfile_name(GOOGLE_SHEETS_CREDENTIALS_FILE, scope)
+        creds = GoogleServiceAccountCredentials.from_service_account_file(GOOGLE_SHEETS_CREDENTIALS_FILE, scopes=scope)
         client = gspread.authorize(creds)
 
         # 2. Abre a planilha

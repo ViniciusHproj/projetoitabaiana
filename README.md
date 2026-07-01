@@ -133,12 +133,13 @@ git push origin main
 
 ## Segurança implementada
 
-- **Rate-limit de login** persistido no MongoDB (sobrevive a reinícios/deploys do Render) — bloqueio temporário por IP e por CPF após tentativas seguidas erradas, com janela deslizante.
+- **Rate-limit de login** persistido no MongoDB (sobrevive a reinícios/deploys do Render) — bloqueio temporário por IP e por CPF após tentativas seguidas erradas, com janela deslizante. O IP do cliente é lido a partir do **último** valor de `X-Forwarded-For` (o escrito pelo proxy confiável do Render), nunca o primeiro — o primeiro valor vem do próprio cliente e poderia ser forjado para burlar o bloqueio por IP.
 - **Sessão única por usuário** — um novo login em outro dispositivo encerra a sessão anterior automaticamente.
 - **Validação de CPF e CNPJ** com cálculo real de dígito verificador (não só formato).
+- **Validação de força de senha** (`AUTH_PASSWORD_VALIDATORS`) aplicada explicitamente no cadastro e na troca de senha de funcionários — Django não faz isso automaticamente fora dos formulários prontos dele.
 - **Proteção contra duplo-submit** em todos os formulários de cadastro/edição (trava temporária + token de uso único).
 - **HTTPS forçado, cookies seguros e HSTS** em produção.
-- Controle de acesso por papel (`is_staff`) verificado em cada view sensível.
+- Controle de acesso por papel (`is_staff`) verificado em cada view sensível (cadastro/edição de funcionários é restrito a supervisores; cadastro/edição de obras é liberado para qualquer funcionário autenticado, por decisão de negócio).
 
 ---
 

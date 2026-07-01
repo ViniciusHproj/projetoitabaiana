@@ -311,13 +311,19 @@
 
     function encerrarSessaoPorInatividade() {
         if (!usuarioEstaLogado) return;
-        const urlLogout = urlLogoutBase + "?motivo=inatividade";
+        // Logout sempre via POST (com CSRF) para evitar CSRF-logout por GET.
         const formLogout = document.querySelector('form[action="' + urlLogoutBase + '"]');
         if (formLogout) {
-            formLogout.action = urlLogout;
+            // Sinaliza o motivo como campo oculto e submete o form existente.
+            let inputMotivo = formLogout.querySelector('input[name="motivo"]');
+            if (!inputMotivo) {
+                inputMotivo = document.createElement('input');
+                inputMotivo.type = 'hidden';
+                inputMotivo.name = 'motivo';
+                formLogout.appendChild(inputMotivo);
+            }
+            inputMotivo.value = 'inatividade';
             formLogout.submit();
-        } else {
-            window.location.href = urlLogout;
         }
     }
 
