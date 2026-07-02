@@ -128,11 +128,11 @@ class MongoTesteBase(TestCase):
     esse nome agora aponta para o banco de teste.
     """
 
-    NOME_BANCO_TESTE = f"{os.environ['MONGODB_DB_NAME']}_teste"
-
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
+        # Avaliado aqui (não no corpo da classe) para não quebrar import sem .env.
+        cls.NOME_BANCO_TESTE = f"{os.environ['MONGODB_DB_NAME']}_teste"
         cls._mongo_client_teste = MongoClient(os.environ["MONGODB_URI"])
         db_teste = cls._mongo_client_teste[cls.NOME_BANCO_TESTE]
 

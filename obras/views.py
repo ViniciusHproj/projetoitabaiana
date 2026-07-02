@@ -50,9 +50,10 @@ def _disparar_em_background(funcao, *args, **kwargs):
                     logger.warning(
                         "Tentativa %s/%s falhou para tarefa em segundo plano %s — tentando de novo em %ss.",
                         tentativa, TENTATIVAS_BACKGROUND, funcao.__name__,
-                        ESPERA_BACKGROUND_SEGUNDOS[tentativa - 1], exc_info=True
+                        ESPERA_BACKGROUND_SEGUNDOS[min(tentativa - 1, len(ESPERA_BACKGROUND_SEGUNDOS) - 1)], exc_info=True
                     )
-                    time.sleep(ESPERA_BACKGROUND_SEGUNDOS[tentativa - 1])
+                    # min() evita IndexError se TENTATIVAS_BACKGROUND for aumentado sem ampliar a tupla.
+                    time.sleep(ESPERA_BACKGROUND_SEGUNDOS[min(tentativa - 1, len(ESPERA_BACKGROUND_SEGUNDOS) - 1)])
                 else:
                     logger.exception(
                         "Erro ao executar tarefa em segundo plano após %s tentativas: %s",
@@ -140,6 +141,7 @@ GOOGLE_SHEETS_SPREADSHEET_NAME = os.environ.get('GOOGLE_SHEETS_SPREADSHEET_NAME'
 LOGIN_MAX_TENTATIVAS = 5
 LOGIN_JANELA_BLOQUEIO_SEGUNDOS = 15 * 60  # 15 minutos
 LOGIN_BLOQUEIOS_PARA_ALERTA = 3  # nº de bloqueios na mesma conta em 24h que dispara alerta de ataque direcionado
+MAX_FOTOS_POR_ENVIO = 10  # limite de fotos por cadastro/edição de obra
 
 
 def _ip_do_cliente(request):
@@ -312,7 +314,7 @@ def _token_ja_usado(token):
 
 def pagina_inicial(request):
     return render(request, 'index.html')
- # Aqui você diz qual arquivo abrir
+
 def index(request):
     return render(request, 'index.html')
 
@@ -952,7 +954,7 @@ def salva_edicao_funcionario(request):
         # Se falhar, reverte o Django para evitar que os dois bancos fiquem
         # em estados divergentes permanentemente.
         try:
-            colecao_funcionarios.update_one({'CPF': cpf_original}, {'$set': dados_atualizados_mongo})
+            resultado_mongo = colecao_funcionarios.update_one({'CPF': cpf_original}, {'$set': dados_atualizados_mongo})
         except Exception:
             try:
                 usuario_django.first_name = _nome_original
@@ -965,6 +967,26 @@ def salva_edicao_funcionario(request):
                     "— estados divergentes para CPF=%s", cpf_original
                 )
             raise
+
+        if resultado_mongo.matched_count == 0:
+            # Documento não encontrado no Mongo — reverte Django para evitar divergência.
+            try:
+                usuario_django.first_name = _nome_original
+                usuario_django.is_staff = _staff_original
+                usuario_django.password = _password_original
+                usuario_django.save(update_fields=['first_name', 'is_staff', 'password'])
+            except Exception:
+                logger.exception(
+                    "CRÍTICO: falha ao fazer rollback do Django após matched_count=0 no MongoDB "
+                    "— estados divergentes para CPF=%s", cpf_original
+                )
+            messages.error(
+                request,
+                f"Perfil do funcionário {cpf_original} não encontrado no banco de dados. "
+                "Contate o administrador do sistema."
+            )
+            request.session['erro_edicao_funcionario'] = _dados_para_repor(request)
+            return redirect('salva_edicao_funcionario')
 
         messages.success(request, f"Dados de {nome_novo} atualizados com sucesso.")
         # Redirect (PRG) — sem isso, um F5 depois de salvar reenviaria o POST
@@ -1030,12 +1052,11 @@ def cadastro_obras(request):
             tipo_execucao, endereco
         ]
 
-        MAX_FOTOS = 10
         if any(not campo for campo in campos_obrigatorios) or not fotos_arquivos:
             return _render_cadastro("Preencha todos os campos obrigatórios e envie pelo menos uma foto da obra.")
 
-        if len(fotos_arquivos) > MAX_FOTOS:
-            return _render_cadastro(f"Envie no máximo {MAX_FOTOS} fotos por cadastro.")
+        if len(fotos_arquivos) > MAX_FOTOS_POR_ENVIO:
+            return _render_cadastro(f"Envie no máximo {MAX_FOTOS_POR_ENVIO} fotos por cadastro.")
 
         if not validar_cnpj(cnpj_empresa.replace('.', '').replace('/', '').replace('-', '')):
             return _render_cadastro("O CNPJ informado é inválido.")
@@ -1261,9 +1282,8 @@ def salva_edicao_obra(request):
         if any(not campo for campo in campos_obrigatorios):
             return _render_edicao("Preencha todos os campos obrigatórios antes de salvar.")
 
-        MAX_FOTOS = 10
-        if len(fotos_novas_arquivos) > MAX_FOTOS:
-            return _render_edicao(f"Envie no máximo {MAX_FOTOS} fotos por vez.")
+        if len(fotos_novas_arquivos) > MAX_FOTOS_POR_ENVIO:
+            return _render_edicao(f"Envie no máximo {MAX_FOTOS_POR_ENVIO} fotos por vez.")
 
         if not validar_cnpj(cnpj_empresa.replace('.', '').replace('/', '').replace('-', '')):
             return _render_edicao("O CNPJ informado é inválido.")
@@ -1297,15 +1317,16 @@ def salva_edicao_obra(request):
             if dt_inicio >= dt_finalizacao:
                 return _render_edicao("A Data de Finalização deve ser posterior à Data de Início.")
 
-        # Só trava contra duplo submit agora — e por mais tempo, pois a edição
-        # também pode reenviar fotos novas pro Cloudinary.
-        _marcar_form_em_processamento(request, 'salva_edicao_obra', segundos=12)
-
-        # Verifica que a obra realmente existe antes de qualquer trabalho —
-        # update_one sem match silencioso retornaria sucesso sem salvar nada.
+        # Verifica que a obra existe ANTES de travar o lock — evita bloquear o
+        # usuário por 12s após um erro de "não encontrada".
         if not colecao_obras.find_one({'ID_OBRA': id_obra}, {'_id': 1}):
             return _render_edicao(f"Obra {id_obra} não encontrada. Refaça a busca.")
 
+        # Trava contra duplo submit só depois da validação de existência.
+        _marcar_form_em_processamento(request, 'salva_edicao_obra', segundos=12)
+
+        erro_foto = False
+        resultado_update = None
         try:
             # 4. PREPARAÇÃO DO DICIONÁRIO DE ATUALIZAÇÃO (Campos de Texto)
             empresa_completa = f"{nome_empresa.upper()} - CNPJ - {cnpj_empresa}"
@@ -1334,18 +1355,18 @@ def salva_edicao_obra(request):
             # 6. PROCESSAMENTO DAS NOVAS FOTOS (Se houver)
             # ==========================================
             urls_novas = []
-            erro_foto = False
             if fotos_novas_arquivos:
                 try:
                     for foto in fotos_novas_arquivos:
                         resultado_upload = cloudinary.uploader.upload(foto, folder="obras_projeto")
                         url_url = resultado_upload.get('secure_url')
+                        if not url_url:
+                            raise ValueError("Cloudinary não retornou 'secure_url' para o upload.")
                         urls_novas.append(url_url)
 
-                    # Atualizamos a CAPA da obra para a primeira das novas fotos enviadas
+                    # Só atualiza capa e timelapse depois que TODOS os uploads terminaram com sucesso.
                     dados_atualizados['URL_FOTO'] = urls_novas[0]
 
-                    # REGISTRO NO TIMELAPSE (Um documento para cada foto nova)
                     registros_historico = []
                     data_registro_br = formatar_data_br(str(agora_edicao.date()))
                     for url in urls_novas:
@@ -1361,38 +1382,53 @@ def salva_edicao_obra(request):
                 except Exception:
                     logger.exception("Erro ao processar imagens da obra")
                     erro_foto = True
+                    # Garante que nenhuma URL parcial chegue ao update do Mongo.
+                    urls_novas = []
+                    dados_atualizados.pop('URL_FOTO', None)
 
             # ==========================================
             # 7. EXECUTANDO OS UPDATES NO MONGODB
             # ==========================================
-            
+
             # Update 1: Atualiza os campos normais ($set)
-            colecao.update_one({'ID_OBRA': id_obra}, {'$set': dados_atualizados})
+            resultado_update = colecao.update_one({'ID_OBRA': id_obra}, {'$set': dados_atualizados})
 
-            # Update 2: Adiciona as novas URLs ao Array de Galeria ($push)
-            if urls_novas:
-                colecao.update_one(
-                    {'ID_OBRA': id_obra},
-                    {'$push': {'GALERIA': {'$each': urls_novas}}}
-                )
+            if resultado_update.matched_count > 0:
+                # Update 2: Adiciona as novas URLs ao Array de Galeria ($push)
+                if urls_novas:
+                    colecao.update_one(
+                        {'ID_OBRA': id_obra},
+                        {'$push': {'GALERIA': {'$each': urls_novas}}}
+                    )
 
-            # ==========================================
-            # 8. ATUALIZAÇÃO NO GOOGLE SHEETS (em segundo plano, mesma lógica do cadastro)
-            # ==========================================
-            dados_para_sheets = dados_atualizados.copy()
-            dados_para_sheets['ID_OBRA'] = id_obra
-            _disparar_em_background(atualizar_no_google_sheets, dados_para_sheets)
-            _bump_cache_obras()
-            if erro_foto:
-                messages.warning(request, f"Obra {id_obra} atualizada, mas houve erro ao processar as novas imagens. Tente enviar as fotos novamente.")
-            else:
-                messages.success(request, f"Obra {id_obra} atualizada com sucesso.")
-            return redirect('salva_edicao_obra')
+                # ==========================================
+                # 8. ATUALIZAÇÃO NO GOOGLE SHEETS (em segundo plano)
+                # ==========================================
+                dados_para_sheets = dados_atualizados.copy()
+                dados_para_sheets['ID_OBRA'] = id_obra
+                _disparar_em_background(atualizar_no_google_sheets, dados_para_sheets)
+                _bump_cache_obras()
 
         except Exception:
             logger.exception("Erro crítico ao salvar edição de obra")
-            messages.error(request, "Erro inesperado ao salvar as alterações. Tente novamente.")
+            if erro_foto:
+                messages.error(request, "Erro ao salvar as alterações e ao processar as imagens. Tente novamente.")
+            else:
+                messages.error(request, "Erro inesperado ao salvar as alterações. Tente novamente.")
             return redirect('salva_edicao_obra')
+
+        # Fora do try/except — messages e redirect não são operações de DB e não
+        # devem ficar dentro de um except amplo (ver CLAUDE.md).
+        if resultado_update is None or resultado_update.matched_count == 0:
+            # A obra existia no find_one acima mas sumiu antes do update (deleção concorrente).
+            messages.error(request, f"Obra {id_obra} não encontrada ao salvar. Refaça a busca.")
+            return redirect('salva_edicao_obra')
+
+        if erro_foto:
+            messages.warning(request, f"Obra {id_obra} atualizada, mas houve erro ao processar as novas imagens. Tente enviar as fotos novamente.")
+        else:
+            messages.success(request, f"Obra {id_obra} atualizada com sucesso.")
+        return redirect('salva_edicao_obra')
 
     # Retorno adequado para HTMX ou acesso direto (GET, ou após o redirect acima)
     dados_repostos = request.session.pop('erro_edicao_obra', None)
@@ -1547,8 +1583,10 @@ def atualizar_no_google_sheets(dados):
     celula = planilha.find(id_procurado, in_column=1)
 
     if not celula:
-        logger.warning("Obra ID %s não foi encontrada na Planilha do Google.", id_procurado)
-        return False
+        # Condição permanente (obra nunca foi sincronizada ou foi deletada da planilha)
+        # — não lança exceção para evitar que _disparar_em_background retente 3x inutilmente.
+        logger.warning("Obra ID %s não foi encontrada na Planilha do Google — sync pendente.", id_procurado)
+        return
 
     numero_da_linha = celula.row
 

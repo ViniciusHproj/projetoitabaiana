@@ -124,7 +124,7 @@ AUTH_PASSWORD_VALIDATORS = [
 # Internationalization
 # https://docs.djangoproject.com/en/6.0/topics/i18n/
 
-LANGUAGE_CODE = 'en-us'
+LANGUAGE_CODE = 'pt-br'
 
 TIME_ZONE = 'UTC'
 
@@ -156,7 +156,7 @@ LOGIN_URL = 'login'
 
 SESSION_COOKIE_AGE = 1800  # 30 minutos
 
-# Muito importante: toda vez que o usuário clica em algo, o cronômetro volta para 1 hora.
+# Muito importante: toda vez que o usuário clica em algo, o cronômetro volta para 30 minutos.
 # Isso garante que a sessão só caia por INATIVIDADE real.
 SESSION_SAVE_EVERY_REQUEST = True
 

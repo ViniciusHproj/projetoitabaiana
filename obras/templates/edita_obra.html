@@ -31,7 +31,8 @@
 
         <div class="field">
           <label>Situação</label>
-          <select name="SITUACAO">
+          <select name="SITUACAO" required>
+            <option value="">Selecione...</option>
             <option value="Finalizada por conclusão de construção" {% if obra.SITUACAO == "Finalizada por conclusão de construção" %}selected{% endif %}>Finalizada por conclusão de construção</option>
             <option value="Finalizada por distrato" {% if obra.SITUACAO == "Finalizada por distrato" %}selected{% endif %}>Finalizada por distrato</option>
             <option value="Em andamento" {% if obra.SITUACAO == "Em andamento" %}selected{% endif %}>Em andamento</option>
@@ -66,7 +67,8 @@
 
         <div class="field">
           <label>Tipo de Execução</label>
-          <select name="TIPO_EXECUCAO" >
+          <select name="TIPO_EXECUCAO" required>
+            <option value="">Selecione...</option>
             <option value="Nova Construção" {% if obra.TIPO_EXECUCAO == "Nova Construção" %}selected{% endif %}>Nova Construção</option>
             <option value="Reforma" {% if obra.TIPO_EXECUCAO == "Reforma" %}selected{% endif %}>Reforma</option>
             <option value="Ampliação" {% if obra.TIPO_EXECUCAO == "Ampliação" %}selected{% endif %}>Ampliação</option>
