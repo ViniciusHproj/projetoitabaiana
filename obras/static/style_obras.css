@@ -1,53 +1,53 @@
 :root {
-  --bg-page: #EAF3DE;
+  --bg-page: #f4f7fc;
   --bg-card: #fff;
-  --bg-input: #f9f9f7;
-  --text-main: #1a1a1a;
-  --text-label: #666;
-  --text-muted: #888;
-  --border-card: rgba(0,0,0,0.12);
-  --border-input: rgba(0,0,0,0.25);
-  --border-input-focus: rgba(0,0,0,0.45);
-  --divider-color: rgba(0,0,0,0.1);
-  --btn-primary-bg: #FAEEDA;
-  --btn-primary-color: #633806;
-  --btn-ghost-border: rgba(0,0,0,0.25);
-  --btn-ghost-color: #666;
-  --btn-ghost-hover: #f5f5f0;
-  --obra-card-bg: #f9f9f7;
-  --obra-valor-color: #633806;
-  --obra-valor-bg: #FAEEDA;
-  --badge-fin-bg: #EAF3DE; --badge-fin-color: #3B6D11;
-  --badge-and-bg: #FAEEDA; --badge-and-color: #633806;
-  --badge-par-bg: #E6F1FB; --badge-par-color: #185FA5;
-  --msg-ok-bg: #EAF3DE; --msg-ok-color: #3B6D11;
-  --header-icon-bg: #FAEEDA;
+  --bg-input: #f8fafc;
+  --text-main: #1a1f2e;
+  --text-label: #5a6a80;
+  --text-muted: #8a9ab0;
+  --border-card: rgba(0,0,0,0.08);
+  --border-input: rgba(0,0,0,0.15);
+  --border-input-focus: #3b7dd8;
+  --divider-color: rgba(0,0,0,0.07);
+  --btn-primary-bg: #3b7dd8;
+  --btn-primary-color: #ffffff;
+  --btn-ghost-border: rgba(0,0,0,0.18);
+  --btn-ghost-color: #5a6a80;
+  --btn-ghost-hover: #f0f4f8;
+  --obra-card-bg: #f8fafc;
+  --obra-valor-color: #1e5eb8;
+  --obra-valor-bg: #e8f1fb;
+  --badge-fin-bg: #e6f4ea; --badge-fin-color: #237a3d;
+  --badge-and-bg: #e8f1fb; --badge-and-color: #1e5eb8;
+  --badge-par-bg: #fff4e0; --badge-par-color: #a05e00;
+  --msg-ok-bg: #e6f4ea; --msg-ok-color: #237a3d;
+  --header-icon-bg: #e8f1fb;
 }
 
 [data-theme="dark"] {
-  --bg-page: #16181d;
-  --bg-card: #1e2128;
-  --bg-input: #252930;
-  --text-main: #e2e4e9;
+  --bg-page: #0f1117;
+  --bg-card: #1a1f2e;
+  --bg-input: #1e2435;
+  --text-main: #ffffff;
   --text-label: #ffffff;
   --text-muted: #ffffff;
-  --border-card: rgba(255,255,255,0.08);
-  --border-input: rgba(255,255,255,0.15);
-  --border-input-focus: rgba(255,255,255,0.35);
-  --divider-color: rgba(255,255,255,0.08);
-  --btn-primary-bg: #3d2200;
-  --btn-primary-color: #f0c070;
-  --btn-ghost-border: rgba(255,255,255,0.18);
+  --border-card: rgba(255,255,255,0.07);
+  --border-input: rgba(255,255,255,0.18);
+  --border-input-focus: #6aacff;
+  --divider-color: rgba(255,255,255,0.07);
+  --btn-primary-bg: #2a5faa;
+  --btn-primary-color: #ffffff;
+  --btn-ghost-border: rgba(255,255,255,0.25);
   --btn-ghost-color: #ffffff;
-  --btn-ghost-hover: #252930;
-  --obra-card-bg: #252930;
-  --obra-valor-color: #f0c070;
-  --obra-valor-bg: #3d2200;
-  --badge-fin-bg: #162510; --badge-fin-color: #6dbf45;
-  --badge-and-bg: #3d2200; --badge-and-color: #f0c070;
-  --badge-par-bg: #0d1e35; --badge-par-color: #5ba8e0;
-  --msg-ok-bg: #162510; --msg-ok-color: #6dbf45;
-  --header-icon-bg: #3d2200;
+  --btn-ghost-hover: #1e2435;
+  --obra-card-bg: #1e2435;
+  --obra-valor-color: #7bbdff;
+  --obra-valor-bg: #162038;
+  --badge-fin-bg: #122518; --badge-fin-color: #5dba7a;
+  --badge-and-bg: #122038; --badge-and-color: #6aacff;
+  --badge-par-bg: #2a1c00; --badge-par-color: #f0a840;
+  --msg-ok-bg: #122518; --msg-ok-color: #5dba7a;
+  --header-icon-bg: #162038;
 }
 
 *{box-sizing:border-box;margin:0;padding:0}
@@ -93,9 +93,123 @@ body{font-family:'DM Sans',sans-serif;font-size:14px;color:var(--text-main);back
 .del-btn{background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:14px;padding:2px 4px;border-radius:4px;transition:color .15s}
 .del-btn:hover{color:#E24B4A}
 
+/* ── FADE-IN ENTRADA ── */
+@keyframes fadeInUp {
+    from { opacity: 0; transform: translateY(14px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+.card {
+    animation: fadeInUp 0.3s ease both;
+}
+
+/* ── HOVER nos obra-cards ── */
+.obra-card {
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.obra-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 18px rgba(59,125,216,0.10);
+}
+
+/* ── SKELETON LOADING ── */
+.skeleton {
+    background: linear-gradient(90deg,
+        rgba(0,0,0,0.06) 25%,
+        rgba(0,0,0,0.10) 50%,
+        rgba(0,0,0,0.06) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.4s infinite;
+    border-radius: 6px;
+}
+[data-theme="dark"] .skeleton {
+    background: linear-gradient(90deg,
+        rgba(255,255,255,0.05) 25%,
+        rgba(255,255,255,0.10) 50%,
+        rgba(255,255,255,0.05) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.4s infinite;
+}
+@keyframes shimmer {
+    from { background-position: 200% 0; }
+    to   { background-position: -200% 0; }
+}
+
+.skeleton-line { height: 13px; border-radius: 4px; margin-bottom: 8px; }
+.skeleton-line.w-full  { width: 100%; }
+.skeleton-line.w-3of4  { width: 75%; }
+.skeleton-line.w-half  { width: 50%; }
+.skeleton-line.w-third { width: 33%; }
+
+/* ── MÉTRICAS DASHBOARD ── */
+.metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 14px;
+    margin-bottom: 24px;
+}
+
+.metric-card {
+    background: var(--bg-card);
+    border: 0.5px solid var(--border-card);
+    border-radius: 12px;
+    padding: 18px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    animation: fadeInUp 0.3s ease both;
+    transition: transform 0.15s, box-shadow 0.15s;
+}
+.metric-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 18px rgba(59,125,216,0.10);
+}
+
+.metric-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: var(--text-label);
+}
+
+.metric-value {
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--text-main);
+    line-height: 1;
+}
+
+.metric-desc {
+    font-size: 11.5px;
+    color: var(--text-muted);
+}
+
+.metric-icon {
+    width: 34px;
+    height: 34px;
+    border-radius: 8px;
+    background: var(--header-icon-bg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 4px;
+}
+
+.metric-icon svg {
+    width: 16px;
+    height: 16px;
+    stroke: var(--btn-primary-bg);
+    fill: none;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
 @media (max-width: 600px) {
     .wrap{padding:1.25rem .75rem}
     .form-grid{grid-template-columns:1fr;gap:12px}
     .btn-row{flex-direction:column}
     .btn-ghost{order:2}
+    .metrics-grid{grid-template-columns:1fr 1fr}
 }

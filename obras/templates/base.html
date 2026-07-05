@@ -3,7 +3,6 @@
 <html lang="pt-BR">
 <head>
   <script>
-    // Aplica o tema antes do render para evitar flash
     (function() {
       const salvo = localStorage.getItem('tema');
       const prefereDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
@@ -16,401 +15,285 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Painel De Gestão de Obras</title>
   <link rel="icon" href="{% static 'logo.jpeg' %}" type="image/png">
-  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="{% static 'style_nav.css' %}" />
   <link rel="stylesheet" href="{% static 'style_obras.css' %}" />
   <script src="{% static 'script_menu.js' %}"></script>
   <script src="{% static 'htmx.min.js' %}"></script>
   {% block extra_css %}{% endblock %}
-
-  <style>
-    /* GARANTIA DE ESPAÇAMENTO */
-    .page-content {
-      padding-top: 90px;
-      min-height: 100vh;
-      display: block;
-      width: 100%;
-    }
-    
-    .dropdown-menu {
-      z-index: 9999;
-      display: none;
-      position: absolute;
-    }
-
-    .dropdown-menu.show-menu {
-      display: block !important;
-    }
-    
-    .nav-link {
-        cursor: pointer;
-    }
-
-    .nav-inner {
-        position: relative;
-    }
-
-    .site-footer {
-        position: fixed;
-        bottom: 0;
-        left: 0;
-        width: 100%;
-        display: flex;
-        justify-content: center;
-        padding: 10px 0;
-        z-index: 999;
-        pointer-events: none;
-    }
-
-    .btn-tema-footer {
-        background: #e4e4e4 !important;
-        border: none;
-        cursor: pointer;
-        font-family: 'Nunito', sans-serif;
-        font-size: 12px;
-        font-weight: 600;
-        color: #1a1a1a !important;
-        padding: 6px 14px;
-        border-radius: 20px;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-        transition: background 0.15s;
-        pointer-events: auto;
-    }
-
-    .btn-tema-footer:hover {
-        background: #d2d2d2 !important;
-    }
-
-    /* Espaço extra no fim do conteúdo para o botão fixo não tampar nada */
-    .page-content {
-        padding-bottom: 56px;
-    }
-
-    .nav-role-badge {
-        background: #3a3f47;
-        color: white;
-        font-size: 12px;
-        font-weight: 700;
-        padding: 5px 12px;
-        border-radius: 20px;
-        letter-spacing: .03em;
-        white-space: nowrap;
-    }
-
-    @media (max-width: 768px) {
-        .nav-role-badge {
-            margin-left: auto;
-        }
-    }
-
-    /* ========================================== */
-    /* ESTILOS DO MENU HAMBÚRGUER (BRANCO + ANIMAÇÃO) */
-    /* ========================================== */
-    .menu-hamburger-btn {
-        display: none; 
-        background: none;
-        border: none;
-        cursor: pointer;
-        color: white !important; /* Cor Branca */
-        padding: 5px 15px;
-        align-items: center;
-        gap: 10px;
-        font-family: 'Nunito', sans-serif;
-        font-weight: 600;
-    }
-
-    .hamburger-icon {
-        width: 20px;
-        height: 14px;
-        position: relative;
-        display: flex;
-        flex-direction: column;
-        justify-content: space-between;
-    }
-
-    .hamburger-icon span {
-        display: block;
-        height: 2px;
-        width: 100%;
-        background-color: white;
-        border-radius: 2px;
-        transition: all 0.3s ease-in-out;
-    }
-
-    /* Transformação para o X */
-    .menu-aberto-anima span:nth-child(1) {
-        transform: translateY(6px) rotate(45deg);
-    }
-    .menu-aberto-anima span:nth-child(2) {
-        opacity: 0;
-    }
-    .menu-aberto-anima span:nth-child(3) {
-        transform: translateY(-6px) rotate(-45deg);
-    }
-
-    /* Em telas pequenas o menu vira hambúrguer; em desktop continua horizontal normalmente */
-    @media (max-width: 768px) {
-        .menu-hamburger-btn {
-            display: flex;
-            margin-left: auto;
-        }
-
-        .nav-links {
-            display: none !important;
-            flex-direction: column;
-            position: absolute;
-            top: 100%;
-            right: 0;
-            background: white;
-            border: 1px solid #ddd;
-            border-radius: 8px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
-            padding: 10px;
-            min-width: 200px;
-            z-index: 9999;
-        }
-
-        .nav-links.menu-aberto {
-            display: flex !important;
-        }
-
-        .nav-links.menu-aberto .nav-link,
-        .nav-links.menu-aberto button {
-            color: #333 !important;
-            text-align: left;
-            width: 100%;
-            padding: 10px 15px;
-        }
-
-        .dropdown-menu {
-            position: static;
-            box-shadow: none;
-            border: none;
-            padding-left: 20px;
-            background: transparent;
-        }
-    }
-  </style>
 </head>
 
 <body>
 
-  <nav style="position: fixed; top: 0; width: 100%; z-index: 1000;">
-    <div class="nav-inner">
-      <a href="{% url 'inicio' %}" class="nav-logo">
-        <div class="nav-logo-icon">
-          <img src="{% static 'logo.jpeg' %}" alt="Logo" style="width: 24px; height: 24px; object-fit: contain;">
-        </div>
-        <span class="nav-logo-text">Gestão de Obras</span>
+<!-- ── MOBILE TOPBAR ── -->
+<div class="mobile-topbar" id="mobile-topbar">
+  <button class="hamburger-btn" id="hamburger-btn" onclick="toggleSidebar()">
+    <span></span><span></span><span></span>
+  </button>
+  <span class="mobile-topbar-logo">Gestão de Obras</span>
+  {% if user.is_authenticated %}
+  <span style="font-size:11px; font-weight:700; background:rgba(255,255,255,0.12); color:#fff; padding:4px 10px; border-radius:20px; white-space:nowrap;">
+    {% if user.is_staff or user.is_superuser %}Supervisor{% else %}Funcionário{% endif %}
+  </span>
+  {% endif %}
+</div>
+
+<!-- ── SIDEBAR OVERLAY (mobile) ── -->
+<div class="sidebar-overlay" id="sidebar-overlay" onclick="closeSidebar()"></div>
+
+<!-- ── SIDEBAR ── -->
+<aside class="sidebar" id="sidebar">
+
+  <!-- Logo -->
+  <a href="{% url 'inicio' %}" class="sidebar-logo" onclick="closeSidebar()">
+    <div class="sidebar-logo-icon">
+      <img src="{% static 'logo.jpeg' %}" alt="Logo" style="width:18px; height:18px; object-fit:contain; border-radius:3px;">
+    </div>
+    <div>
+      <div class="sidebar-logo-text">Gestão de Obras</div>
+      <div class="sidebar-logo-sub">Itabaiana</div>
+    </div>
+  </a>
+
+  <!-- Nav links -->
+  <nav class="sidebar-nav">
+
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Principal</div>
+
+      <a href="{% url 'inicio' %}"
+         hx-get="{% url 'inicio' %}" hx-target="#conteudo-dinamico" hx-swap="innerHTML" hx-push-url="true"
+         class="sidebar-link" id="link-inicio" onclick="closeSidebar()">
+        <span class="sidebar-link-icon">
+          <svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+        </span>
+        Início
       </a>
 
-      {% if user.is_authenticated %}
-      <span class="nav-role-badge">{% if user.is_staff or user.is_superuser %}Supervisor{% else %}Funcionário{% endif %}</span>
-      {% endif %}
-
-      <button class="menu-hamburger-btn" onclick="toggleMenuPrincipal()">
-        <div class="hamburger-icon" id="icon-referencia">
-            <span></span>
-            <span></span>
-            <span></span>
-        </div>
-        <span>Menu</span>
-      </button>
-
-      <ul class="nav-links" id="lista-nav-links">
-        <li>
-          <a href="{% url 'inicio' %}" class="nav-link active" id="link-inicio">Início</a>
-        </li>
-
-        {% if user.is_authenticated %}
-        
-        <li>
-          <button class="nav-link dropdown-toggle" onclick="toggleDropdown(this)">
-            Cadastro
-            <svg class="chevron" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-          </button>
-
-          <div class="dropdown-menu">
-            {% if user.is_staff or user.is_superuser %}
-            <a hx-get="{% url 'cadastro_funcionario' %}" hx-target="#conteudo-dinamico" hx-swap="innerHTML" hx-push-url="true" class="dropdown-item" onclick="closeAllMenus()">Cadastro de Funcionário</a>
-            {% endif %}
-            <a hx-get="{% url 'Cadastro-Obras' %}" hx-target="#conteudo-dinamico" hx-swap="innerHTML" hx-push-url="true" class="dropdown-item" onclick="closeAllMenus()">Cadastro de Obras</a>
-          </div> 
-        </li>
-          
-        <li>
-          <button class="nav-link dropdown-toggle" onclick="toggleDropdown(this)">
-            Atualização
-            <svg class="chevron" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-          </button>
-
-          <div class="dropdown-menu">
-            {% if user.is_staff or user.is_superuser %}
-            <a hx-get="{% url 'busca_atualiza_funcionario' %}" hx-target="#conteudo-dinamico" hx-swap="innerHTML" hx-push-url="true" class="dropdown-item" onclick="closeAllMenus()">Atualização de Funcionário</a>
-            {% endif %}
-            <a hx-get="{% url 'busca_atualiza_obra' %}" hx-target="#conteudo-dinamico" hx-swap="innerHTML" hx-push-url="true" class="dropdown-item" onclick="closeAllMenus()">Atualização de Obras</a>
-          </div>
-        </li>
-
-        <li>
-          <form action="{% url 'logout' %}" method="post" id="form-logout" style="display: inline; width: 100%;">
-              {% csrf_token %}
-              <button type="submit" id="btn-logout" class="nav-link" style="background: white; border: 1.5px solid #d9534f; border-radius: 6px; cursor: pointer; color: #d9534f !important; font-weight: bold; padding: 5px 14px; display: inline-flex; align-items: center; justify-content: center; gap: 6px;">
-                <span class="texto-botao">Sair</span>
-                <div class="spinner-loading" style="border-color: rgba(217,83,79,0.3); border-top-color: #d9534f;"></div>
-              </button>
-          </form>
-          <script>
-              document.getElementById('form-logout').addEventListener('submit', function () {
-                  var botao = document.getElementById('btn-logout');
-                  botao.classList.add('htmx-request');
-                  botao.disabled = true;
-              });
-          </script>
-        </li>
-
-        {% else %}
-        <li>
-            <a hx-get="{% url 'login' %}" hx-target="#conteudo-dinamico" hx-swap="innerHTML" hx-push-url="true" class="nav-link">Login</a>
-        </li>
-        {% endif %}
-      </ul>
+      <a hx-get="{% url 'lista_obras' %}" hx-target="#conteudo-dinamico" hx-swap="innerHTML" hx-push-url="true"
+         class="sidebar-link" onclick="closeSidebar()">
+        <span class="sidebar-link-icon">
+          <svg viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+        </span>
+        Lista pública
+      </a>
     </div>
+
+    {% if user.is_authenticated %}
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Cadastro</div>
+
+      <a hx-get="{% url 'Cadastro-Obras' %}" hx-target="#conteudo-dinamico" hx-swap="innerHTML" hx-push-url="true"
+         class="sidebar-link" onclick="closeSidebar()">
+        <span class="sidebar-link-icon">
+          <svg viewBox="0 0 24 24"><rect x="2" y="10" width="20" height="10" rx="2"/><rect x="6" y="6" width="12" height="5" rx="1"/><rect x="10" y="3" width="4" height="4" rx="1"/></svg>
+        </span>
+        Cadastro de Obras
+      </a>
+
+      {% if user.is_staff or user.is_superuser %}
+      <a hx-get="{% url 'cadastro_funcionario' %}" hx-target="#conteudo-dinamico" hx-swap="innerHTML" hx-push-url="true"
+         class="sidebar-link" onclick="closeSidebar()">
+        <span class="sidebar-link-icon">
+          <svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>
+        </span>
+        Cadastro de Funcionário
+      </a>
+      {% endif %}
+    </div>
+
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Atualização</div>
+
+      <a hx-get="{% url 'busca_atualiza_obra' %}" hx-target="#conteudo-dinamico" hx-swap="innerHTML" hx-push-url="true"
+         class="sidebar-link" onclick="closeSidebar()">
+        <span class="sidebar-link-icon">
+          <svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+        </span>
+        Atualização de Obras
+      </a>
+
+      {% if user.is_staff or user.is_superuser %}
+      <a hx-get="{% url 'busca_atualiza_funcionario' %}" hx-target="#conteudo-dinamico" hx-swap="innerHTML" hx-push-url="true"
+         class="sidebar-link" onclick="closeSidebar()">
+        <span class="sidebar-link-icon">
+          <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        </span>
+        Atualização de Funcionário
+      </a>
+      {% endif %}
+    </div>
+    {% else %}
+    <div class="sidebar-section">
+      <a hx-get="{% url 'login' %}" hx-target="#conteudo-dinamico" hx-swap="innerHTML" hx-push-url="true"
+         class="sidebar-link" onclick="closeSidebar()">
+        <span class="sidebar-link-icon">
+          <svg viewBox="0 0 24 24"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
+        </span>
+        Login
+      </a>
+    </div>
+    {% endif %}
+
   </nav>
 
+  <!-- Sidebar footer: usuário + logout -->
+  <div class="sidebar-footer">
+    {% if user.is_authenticated %}
+    <div class="sidebar-user-card">
+      <div class="sidebar-avatar">{{ user.first_name|first|upper|default:user.username|first|upper }}</div>
+      <div>
+        <div class="sidebar-username">{{ user.first_name|default:user.username }}</div>
+        <div class="sidebar-role">{% if user.is_staff or user.is_superuser %}Supervisor{% else %}Funcionário{% endif %}</div>
+      </div>
+    </div>
+
+    <form action="{% url 'logout' %}" method="post" id="form-logout">
+      {% csrf_token %}
+      <button type="submit" id="btn-logout" class="sidebar-logout">
+        <svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+        <span class="texto-botao">Sair</span>
+        <div class="spinner-loading" style="margin-left:auto; border-color:rgba(224,112,112,0.3); border-top-color:#e07070;"></div>
+      </button>
+    </form>
+    {% endif %}
+  </div>
+
+</aside>
+
+<!-- ── MAIN CONTENT ── -->
+<div class="sidebar-main">
   <main class="page-content" id="conteudo-dinamico">
     {% block content %}{% endblock %}
   </main>
+</div>
 
-  <footer class="site-footer">
-    <button class="btn-tema-footer" id="btn-tema" onclick="alternarTema()">Modo Escuro</button>
-  </footer>
+<!-- ── BOTÃO TEMA ── -->
+<footer class="site-footer">
+  <button class="btn-tema-footer" id="btn-tema" onclick="alternarTema()">Modo Escuro</button>
+</footer>
 
 <script>
-    function toggleMenuPrincipal() {
-        const menu = document.getElementById('lista-nav-links');
-        const icon = document.getElementById('icon-referencia');
-        menu.classList.toggle('menu-aberto');
-        icon.classList.toggle('menu-aberto-anima');
-        resetarTimer();
+  /* ── Sidebar toggle (mobile) ── */
+  function toggleSidebar() {
+    const sidebar = document.getElementById('sidebar');
+    const overlay = document.getElementById('sidebar-overlay');
+    const btn = document.getElementById('hamburger-btn');
+    sidebar.classList.toggle('open');
+    overlay.classList.toggle('visible');
+    btn.classList.toggle('open');
+  }
+
+  function closeSidebar() {
+    const sidebar = document.getElementById('sidebar');
+    const overlay = document.getElementById('sidebar-overlay');
+    const btn = document.getElementById('hamburger-btn');
+    sidebar.classList.remove('open');
+    overlay.classList.remove('visible');
+    btn.classList.remove('open');
+  }
+
+  /* ── Logout spinner ── */
+  document.getElementById('form-logout') && document.getElementById('form-logout').addEventListener('submit', function () {
+    const btn = document.getElementById('btn-logout');
+    if (btn) { btn.classList.add('htmx-request'); btn.disabled = true; }
+  });
+
+  /* ── Sessão por inatividade ── */
+  const usuarioEstaLogado = "{{ user.is_authenticated|yesno:'true,false' }}" === "true";
+  const tempoLimite = 30 * 60 * 1000;
+  let temporizador;
+  const urlLogoutBase = "{% url 'logout' %}";
+
+  function encerrarSessaoPorInatividade() {
+    if (!usuarioEstaLogado) return;
+    const formLogout = document.querySelector('form[action="' + urlLogoutBase + '"]');
+    if (formLogout) {
+      let inputMotivo = formLogout.querySelector('input[name="motivo"]');
+      if (!inputMotivo) {
+        inputMotivo = document.createElement('input');
+        inputMotivo.type = 'hidden';
+        inputMotivo.name = 'motivo';
+        formLogout.appendChild(inputMotivo);
+      }
+      inputMotivo.value = 'inatividade';
+      formLogout.submit();
     }
+  }
 
-    window.closeAllMenus = function() {
-        const menu = document.getElementById('lista-nav-links');
-        const icon = document.getElementById('icon-referencia');
-        if(menu) menu.classList.remove('menu-aberto');
-        if(icon) icon.classList.remove('menu-aberto-anima');
-        closeDropdowns();
-    };
+  window.resetarTimer = function() {
+    clearTimeout(temporizador);
+    temporizador = setTimeout(encerrarSessaoPorInatividade, tempoLimite);
+  };
 
-    const usuarioEstaLogado = "{{ user.is_authenticated|yesno:'true,false' }}" === "true";
-    const tempoLimite = 30 * 60 * 1000; // 30 minutos
-    let temporizador;
+  window.onload = resetarTimer;
 
-    const urlLogoutBase = "{% url 'logout' %}";
-
-    function encerrarSessaoPorInatividade() {
-        if (!usuarioEstaLogado) return;
-        // Logout sempre via POST (com CSRF) para evitar CSRF-logout por GET.
-        const formLogout = document.querySelector('form[action="' + urlLogoutBase + '"]');
-        if (formLogout) {
-            // Sinaliza o motivo como campo oculto e submete o form existente.
-            let inputMotivo = formLogout.querySelector('input[name="motivo"]');
-            if (!inputMotivo) {
-                inputMotivo = document.createElement('input');
-                inputMotivo.type = 'hidden';
-                inputMotivo.name = 'motivo';
-                formLogout.appendChild(inputMotivo);
-            }
-            inputMotivo.value = 'inatividade';
-            formLogout.submit();
-        }
+  document.addEventListener('click', function(event) {
+    if (event.target.closest('button, a, input[type="submit"], .sidebar-link')) {
+      resetarTimer();
     }
+  });
+  document.addEventListener('submit', resetarTimer);
 
-    window.resetarTimer = function() {
-        clearTimeout(temporizador);
-        temporizador = setTimeout(encerrarSessaoPorInatividade, tempoLimite);
-    };
+  /* ── HTMX hooks ── */
+  document.body.addEventListener('htmx:afterOnLoad', function() {
+    resetarTimer();
+    processarMensagens();
+  });
 
-    // Só reinicia o timer em AÇÕES reais do usuário (clique em botão/link, navegação,
-    // submit de formulário) — não em mero movimento de mouse, scroll ou tecla solta.
-    window.onload = resetarTimer;
-
-    document.addEventListener('click', function(event) {
-        if (event.target.closest('button, a, input[type="submit"], .nav-link, .dropdown-item')) {
-            resetarTimer();
-        }
-    });
-
-    document.addEventListener('submit', resetarTimer);
-
-    window.toggleDropdown = function(botaoClicado) {
-        const menuAtual = botaoClicado.parentElement.querySelector('.dropdown-menu');
-        document.querySelectorAll('.dropdown-menu').forEach(function(menu) {
-            if (menu !== menuAtual) { menu.classList.remove('show-menu'); }
-        });
-        if (menuAtual) { menuAtual.classList.toggle('show-menu'); }
-        resetarTimer();
-    };
-
-    window.closeDropdowns = function() {
-        document.querySelectorAll('.dropdown-menu').forEach(function(menu) {
-            menu.classList.remove('show-menu');
-        });
-    };
-
-    document.addEventListener('click', function(event) {
-        if (!event.target.closest('.nav-links') && !event.target.closest('.menu-hamburger-btn')) {
-            closeAllMenus();
-        }
-    });
-
-    document.body.addEventListener('htmx:afterOnLoad', function(evt) {
-        resetarTimer();
-        processarMensagens();
-    });
-
-    document.body.addEventListener('htmx:beforeSwap', function(evt) {
-        if (evt.detail.xhr.responseURL && evt.detail.xhr.responseURL.includes('/login/')) {
-            evt.preventDefault();
-            window.location.href = evt.detail.xhr.responseURL;
-        }
-    });
-
-    window.processarMensagens = function() {
-        const mensagens = Array.from(document.querySelectorAll('.alerta-animado'));
-        const textosVistos = new Set();
-        mensagens.reverse().forEach(msg => {
-            const texto = msg.innerText.trim();
-            if (textosVistos.has(texto)) {
-                msg.remove(); 
-            } else {
-                textosVistos.add(texto);
-                setTimeout(() => { if (msg) msg.remove(); }, 4500);
-            }
-        });
-    };
-    window.addEventListener('load', processarMensagens);
-
-    function atualizarIconeTema() {
-        const escuro = document.documentElement.getAttribute('data-theme') === 'dark';
-        const btn = document.getElementById('btn-tema');
-        if (btn) btn.textContent = escuro ? 'Modo Claro' : 'Modo Escuro';
+  document.body.addEventListener('htmx:beforeSwap', function(evt) {
+    if (evt.detail.xhr.responseURL && evt.detail.xhr.responseURL.includes('/login/')) {
+      evt.preventDefault();
+      window.location.href = evt.detail.xhr.responseURL;
     }
+  });
 
-    window.alternarTema = function() {
-        const escuro = document.documentElement.getAttribute('data-theme') === 'dark';
-        if (escuro) {
-            document.documentElement.removeAttribute('data-theme');
-            localStorage.setItem('tema', 'light');
-        } else {
-            document.documentElement.setAttribute('data-theme', 'dark');
-            localStorage.setItem('tema', 'dark');
-        }
-        atualizarIconeTema();
-    };
+  window.processarMensagens = function() {
+    const mensagens = Array.from(document.querySelectorAll('.alerta-animado'));
+    const textosVistos = new Set();
+    mensagens.reverse().forEach(msg => {
+      const texto = msg.innerText.trim();
+      if (textosVistos.has(texto)) {
+        msg.remove();
+      } else {
+        textosVistos.add(texto);
+        setTimeout(() => { if (msg) msg.remove(); }, 4500);
+      }
+    });
+  };
+  window.addEventListener('load', processarMensagens);
 
-    window.addEventListener('load', atualizarIconeTema);
+  /* ── Scroll condicional ── */
+  function atualizarScroll() {
+    const main = document.querySelector('.sidebar-main');
+    if (!main) return;
+    const temScroll = document.querySelector('[data-pagina-scroll]') !== null;
+    main.classList.toggle('permite-scroll', temScroll);
+    if (temScroll) main.scrollTop = 0;
+  }
+  window.addEventListener('load', atualizarScroll);
+  document.body.addEventListener('htmx:afterSwap', atualizarScroll);
+
+  /* ── Tema ── */
+  function atualizarIconeTema() {
+    const escuro = document.documentElement.getAttribute('data-theme') === 'dark';
+    const btn = document.getElementById('btn-tema');
+    if (btn) btn.textContent = escuro ? 'Modo Claro' : 'Modo Escuro';
+  }
+
+  window.alternarTema = function() {
+    const escuro = document.documentElement.getAttribute('data-theme') === 'dark';
+    if (escuro) {
+      document.documentElement.removeAttribute('data-theme');
+      localStorage.setItem('tema', 'light');
+    } else {
+      document.documentElement.setAttribute('data-theme', 'dark');
+      localStorage.setItem('tema', 'dark');
+    }
+    atualizarIconeTema();
+  };
+
+  window.addEventListener('load', atualizarIconeTema);
 </script>
 </body>
 </html>

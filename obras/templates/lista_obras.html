@@ -1,15 +1,13 @@
-{% extends 'base.html' %}
-
-{% block content %}
+{% load static %}
+<div data-pagina-scroll hidden></div>
 <style>
-    /* Configuração para PC e Tablets Maiores */
     .container-obras {
         padding: 20px;
         max-width: 1200px;
         margin: 0 auto;
         box-sizing: border-box;
     }
-    
+
     .grid-obras {
         display: grid;
         grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
@@ -62,13 +60,12 @@
         color: #c8d0dc !important;
     }
 
-    /* Mágica para Celulares (telas menores que 768px) */
     @media (max-width: 768px) {
         .container-obras {
-            padding: 10px; /* Menos margem nas laterais da tela */
+            padding: 10px;
         }
         .grid-obras {
-            grid-template-columns: 1fr; /* Força 1 única coluna */
+            grid-template-columns: 1fr;
             gap: 15px;
         }
         .cartao-obra {
@@ -79,11 +76,11 @@
 
 <div class="container-obras">
     <h2 style="color: #333; margin-bottom: 20px; text-align: center;">Informações Detalhadas das Obras</h2>
-    
+
     <div class="grid-obras">
         {% for obra in obras %}
         <div class="cartao-obra">
-            
+
             {% if obra.URL_FOTO %}
                 <div style="position: relative;">
                     <img src="{{ obra.URL_FOTO }}" alt="Foto da Obra"
@@ -109,18 +106,18 @@
             <h3 style="margin: 0 0 10px 0; color: #007bff; font-size: 18px;">
                 {{ obra.TIPO_OBRA|title|default:"Obra Sem Tipo" }}
             </h3>
-            
+
             <div style="margin-bottom: 15px;">
                 <p style="margin: 4px 0; font-size: 14px;"><strong>ID:</strong> {{ obra.ID_OBRA }}</p>
                 <p style="margin: 4px 0; font-size: 14px;"><strong>Valor:</strong> R$ {{ obra.VALOR_OBRA }}</p>
-                <p style="margin: 4px 0; font-size: 14px;"><strong>Situação:</strong> 
-                    <span style="background: 
+                <p style="margin: 4px 0; font-size: 14px;"><strong>Situação:</strong>
+                    <span style="background:
                         {% if obra.SITUACAO == 'Em andamento' %}#28a745
                         {% elif obra.SITUACAO == 'Finalizada por conclusão de construção' or obra.SITUACAO == 'Finalizada por distrato' %}#155d27
                         {% elif obra.SITUACAO == 'Paralisada' %}#b8860b
                         {% elif obra.SITUACAO == 'Cancelada' %}#dc3545
                         {% elif obra.SITUACAO == 'Em licitação' %}#50c878
-                        {% else %}#6c757d{% endif %}; 
+                        {% else %}#6c757d{% endif %};
                         color: white; padding: 3px 8px; border-radius: 12px; font-size: 12px; font-weight: bold; display: inline-block;">
                         {{ obra.SITUACAO }}
                     </span>
@@ -142,7 +139,7 @@
                 <p style="margin: 3px 0; font-size: 12px; color: #555;"><strong>Previsão:</strong> {{ obra.CONCLUSAO_PREVISTA }}</p>
                 <p style="margin: 3px 0; font-size: 12px; color: #555;"><strong>Finalização:</strong> {{ obra.DATA_FINALIZACAO }}</p>
             </div>
-            
+
         </div>
         {% empty %}
             <div style="grid-column: 1 / -1; text-align: center; padding: 50px; background: white; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.05);">
@@ -155,15 +152,18 @@
     {% if total_paginas > 1 %}
     <div style="display: flex; justify-content: center; align-items: center; gap: 12px; margin-top: 24px;">
         {% if tem_anterior %}
-            <a href="?pagina={{ pagina_atual|add:'-1' }}" style="padding: 8px 16px; border-radius: 8px; background: #4589C8; color: white; text-decoration: none; font-weight: 600;">← Anterior</a>
+            <a hx-get="{% url 'lista_obras' %}?pagina={{ pagina_atual|add:'-1' }}"
+               hx-target="#conteudo-dinamico" hx-swap="innerHTML" hx-push-url="true"
+               style="padding: 8px 16px; border-radius: 8px; background: #4589C8; color: white; text-decoration: none; font-weight: 600; cursor: pointer;">← Anterior</a>
         {% endif %}
         <span style="font-size: 14px; color: #555;">Página {{ pagina_atual }} de {{ total_paginas }}</span>
         {% if tem_proxima %}
-            <a href="?pagina={{ pagina_atual|add:'1' }}" style="padding: 8px 16px; border-radius: 8px; background: #4589C8; color: white; text-decoration: none; font-weight: 600;">Próxima →</a>
+            <a hx-get="{% url 'lista_obras' %}?pagina={{ pagina_atual|add:'1' }}"
+               hx-target="#conteudo-dinamico" hx-swap="innerHTML" hx-push-url="true"
+               style="padding: 8px 16px; border-radius: 8px; background: #4589C8; color: white; text-decoration: none; font-weight: 600; cursor: pointer;">Próxima →</a>
         {% endif %}
     </div>
     {% endif %}
 </div>
 
 <div id="container-modal-galeria"></div>
-{% endblock %}

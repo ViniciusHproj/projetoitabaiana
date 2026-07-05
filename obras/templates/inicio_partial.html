@@ -1,0 +1,122 @@
+{% load static %}
+<div data-pagina-scroll hidden></div>
+{% if messages %}
+    <style>
+        .msg-success { background-color: #d4edda; color: #155724; border-color: #c3e6cb; }
+        .msg-error   { background-color: #f8d7da; color: #721c24; border-color: #f5c6cb; }
+        .msg-warning { background-color: #fff3cd; color: #856404; border-color: #ffeeba; }
+        .msg-info    { background-color: #d1ecf1; color: #0c5460; border-color: #bee5eb; }
+    </style>
+    <div id="container-mensagens-global" style="position: fixed; top: 85px; left: 50%; transform: translateX(-50%); z-index: 10000; width: 100%; max-width: 400px; display: flex; flex-direction: column; align-items: center; pointer-events: none;">
+        {% for message in messages %}
+            <div class="alerta-animado msg-{{ message.tags|default:'info' }}" style="
+                padding: 12px 25px;
+                border: 1px solid transparent;
+                border-radius: 50px;
+                font-weight: bold;
+                box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+                margin-bottom: 10px;
+                pointer-events: auto;
+            ">
+                {{ message }}
+            </div>
+        {% endfor %}
+    </div>
+{% endif %}
+
+<!-- Cabeçalho da tela inicial -->
+<div style="margin-bottom: 24px;">
+    <h1 style="font-size: 22px; font-weight: 700; color: var(--welcome-title, #1a3050); margin-bottom: 4px;">Painel de Gestão de Obras</h1>
+    <p style="font-size: 13.5px; color: var(--welcome-text, #5a7fa0);">Indicadores em tempo real das obras do município de Itabaiana.</p>
+</div>
+
+<!-- Cards de métricas -->
+<div class="metrics-grid">
+    <div class="metric-card">
+        <div class="metric-icon">
+            <svg viewBox="0 0 24 24"><rect x="2" y="10" width="20" height="10" rx="2"/><rect x="6" y="6" width="12" height="5" rx="1"/><rect x="10" y="3" width="4" height="4" rx="1"/></svg>
+        </div>
+        <div class="metric-label">Total de obras</div>
+        <div class="metric-value">{{ metricas.total }}</div>
+        <div class="metric-desc">registradas no sistema</div>
+    </div>
+    <div class="metric-card">
+        <div class="metric-icon" style="background: #e8f4ec;">
+            <svg viewBox="0 0 24 24" style="stroke: #237a3d;"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        </div>
+        <div class="metric-label">Em andamento</div>
+        <div class="metric-value" style="color: #237a3d;">{{ metricas.em_andamento }}</div>
+        <div class="metric-desc">obras em execução</div>
+    </div>
+    <div class="metric-card">
+        <div class="metric-icon" style="background: #e8f1fb;">
+            <svg viewBox="0 0 24 24" style="stroke: #1e5eb8;"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+        </div>
+        <div class="metric-label">Finalizadas</div>
+        <div class="metric-value" style="color: #1e5eb8;">{{ metricas.finalizadas }}</div>
+        <div class="metric-desc">obras concluídas</div>
+    </div>
+    <div class="metric-card">
+        <div class="metric-icon" style="background: #fff4e0;">
+            <svg viewBox="0 0 24 24" style="stroke: #a05e00;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        </div>
+        <div class="metric-label">Paralisadas</div>
+        <div class="metric-value" style="color: #a05e00;">{{ metricas.paralisadas }}</div>
+        <div class="metric-desc">paradas ou canceladas</div>
+    </div>
+</div>
+
+<!-- Link público + aviso -->
+<div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 20px;">
+    <a hx-get="{% url 'lista_obras' %}" hx-target="#conteudo-dinamico" hx-swap="innerHTML" hx-push-url="true"
+       style="display: inline-flex; align-items: center; gap: 8px; padding: 10px 20px; background: var(--btn-primary-bg, #3b7dd8); color: #fff; text-decoration: none; border-radius: 8px; font-size: 13.5px; font-weight: 600; transition: opacity 0.15s; cursor: pointer;"
+       onmouseover="this.style.opacity='.85'" onmouseout="this.style.opacity='1'">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+        Ver lista pública de obras
+    </a>
+    <span style="font-size: 12px; color: var(--welcome-text, #5a7fa0); font-style: italic;">Para melhor experiência, acesse por computador.</span>
+</div>
+
+<!-- Dashboard BI iframe -->
+<div class="dashboard-wrapper">
+    <iframe title="Itabaiana Obras BI" src="https://datastudio.google.com/embed/reporting/b9a88d30-71b8-4d4c-afea-a5c51d4f04c1/page/Q69vF" frameborder="0" allowfullscreen="true"></iframe>
+</div>
+
+<style>
+    .dashboard-wrapper {
+        position: relative;
+        padding-bottom: 56.25%;
+        height: 0;
+        overflow: hidden;
+        border-radius: 12px;
+        box-shadow: 0 8px 20px rgba(0, 0, 0, 0.1);
+    }
+    .dashboard-wrapper iframe {
+        position: absolute;
+        top: 0; left: 0;
+        width: 100%; height: 100%;
+        border: none;
+    }
+    .alerta-animado {
+        animation: surgirESumir 4s ease-in-out forwards;
+    }
+    @keyframes surgirESumir {
+        0% { opacity: 0; transform: translateY(-50px) scale(0.9); }
+        10% { opacity: 1; transform: translateY(0) scale(1); }
+        80% { opacity: 1; transform: translateY(0) scale(1); }
+        100% { opacity: 0; transform: translateY(-100px) scale(0.8); }
+    }
+</style>
+
+<script>
+    document.body.addEventListener('htmx:afterOnLoad', function() {
+        setTimeout(function() {
+            const globalMsgs = document.getElementById('container-mensagens-global');
+            if (globalMsgs) globalMsgs.remove();
+        }, 4500);
+    });
+    setTimeout(function() {
+        const globalMsgs = document.getElementById('container-mensagens-global');
+        if (globalMsgs) globalMsgs.remove();
+    }, 4500);
+</script>

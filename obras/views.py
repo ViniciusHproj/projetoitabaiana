@@ -340,11 +340,30 @@ def _token_ja_usado(token):
     cache.set(chave, True, 300)  # 5 minutos é mais que suficiente para qualquer reenvio
     return False
 
+def _metricas_obras():
+    try:
+        total = colecao_obras.count_documents({})
+        em_andamento = colecao_obras.count_documents({"SITUACAO": "Em andamento"})
+        finalizadas = colecao_obras.count_documents({"SITUACAO": {"$in": [
+            "Finalizada por conclusão de construção", "Finalizada por distrato"
+        ]}})
+        paralisadas = colecao_obras.count_documents({"SITUACAO": {"$in": ["Paralisada", "Cancelada"]}})
+        return {"total": total, "em_andamento": em_andamento, "finalizadas": finalizadas, "paralisadas": paralisadas}
+    except Exception:
+        return {"total": "—", "em_andamento": "—", "finalizadas": "—", "paralisadas": "—"}
+
+
 def pagina_inicial(request):
-    return render(request, 'index.html')
+    ctx = {"metricas": _metricas_obras()}
+    if request.headers.get('HX-Request'):
+        return render(request, 'inicio_partial.html', ctx)
+    return render(request, 'index.html', ctx)
 
 def index(request):
-    return render(request, 'index.html')
+    ctx = {"metricas": _metricas_obras()}
+    if request.headers.get('HX-Request'):
+        return render(request, 'inicio_partial.html', ctx)
+    return render(request, 'index.html', ctx)
 
 
 def data_e_valida(data_str, tipo="geral"):
@@ -1521,8 +1540,9 @@ def lista_obras(request):
         }
         cache.set(chave_cache, contexto, CACHE_TTL_SEGUNDOS)
 
-    # Renderiza a página completa
-    return render(request, 'lista_obras.html', contexto)
+    if request.headers.get('HX-Request'):
+        return render(request, 'lista_obras.html', contexto)
+    return render(request, 'index.html', {'template_meio': 'lista_obras.html', **contexto})
 
 def galeria_obra(request, id_obra):
     try:
