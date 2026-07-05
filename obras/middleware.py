@@ -12,12 +12,10 @@ class CSPNonceMiddleware:
     """
     Gera um nonce aleatório por request e o injeta em:
       - request.csp_nonce  (acessível nos templates via {{ request.csp_nonce }})
-      - Content-Security-Policy-Report-Only header na resposta
+      - Content-Security-Policy header na resposta (enforcement completo)
 
-    Usando Report-Only enquanto os partials ainda estão sendo migrados
-    (não bloqueia scripts, apenas reporta violações no console do navegador).
-    Será trocado para Content-Security-Policy na Parte 4 da migração CSP,
-    quando todos os scripts inline dos partials forem movidos para JS externo.
+    script-src: apenas scripts do próprio servidor ou com nonce válido por request.
+    Nenhum inline sem nonce, nenhum script de CDN externo — proteção real contra XSS.
     """
 
     def __init__(self, get_response):
@@ -37,7 +35,7 @@ class CSPNonceMiddleware:
             "frame-src https://datastudio.google.com https://lookerstudio.google.com; "
             "object-src 'none';"
         )
-        response['Content-Security-Policy-Report-Only'] = csp
+        response['Content-Security-Policy'] = csp
         return response
 
 

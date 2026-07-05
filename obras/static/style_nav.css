@@ -144,9 +144,31 @@ body {
     background: none;
     width: 100%;
     text-align: left;
-    white-space: nowrap;
     overflow: hidden;
-    text-overflow: ellipsis;
+}
+
+.sidebar-link-text {
+    white-space: nowrap;
+    flex-shrink: 0;
+    display: inline-block;
+}
+
+.sidebar-link-text.marquee {
+    animation: sidebar-marquee 3s ease-in-out infinite;
+    animation-play-state: paused;
+}
+
+.sidebar-link:hover .sidebar-link-text.marquee {
+    animation-play-state: running;
+}
+
+@keyframes sidebar-marquee {
+    0%   { transform: translateX(0); }
+    15%  { transform: translateX(0); }
+    45%  { transform: translateX(var(--marquee-offset)); }
+    55%  { transform: translateX(var(--marquee-offset)); }
+    85%  { transform: translateX(0); }
+    100% { transform: translateX(0); }
 }
 
 .sidebar-link:hover {
@@ -541,10 +563,24 @@ body {
     color: rgba(255,255,255,0.85) !important;
 }
 
+/* Tab ativa em light mode: --btn-primary-color é #fff (para texto em botão),
+   então usamos --btn-primary-bg (azul escuro) para o texto da tab ativa. */
+.tab-btn.tab-ativo {
+    color: var(--btn-primary-bg, #3b7dd8) !important;
+    border-bottom-color: var(--btn-primary-bg, #3b7dd8) !important;
+}
 [data-theme="dark"] .tab-btn { color: #ffffff !important; }
 [data-theme="dark"] .tab-btn.tab-ativo {
     color: #6aacff !important;
     border-bottom-color: #6aacff !important;
+}
+
+/* File input: sobrescreve inline styles do template e força dark mode nativo */
+[data-theme="dark"] input[type="file"] {
+    color-scheme: dark;
+    background: var(--bg-input, #1e2435) !important;
+    border-color: rgba(255,255,255,0.2) !important;
+    color: var(--text-main, #ffffff) !important;
 }
 
 /* ── TEMA FOOTER BUTTON ── */

@@ -21,6 +21,7 @@ from django.contrib.auth import authenticate, login as auth_login
 from django.contrib.auth import logout as auth_logout
 from django.contrib.messages import get_messages
 from django.utils.http import url_has_allowed_host_and_scheme
+from django.urls import reverse
 from obras.utils import formatar_data_br, preparar_data_para_input
 # Create your views here.
 
@@ -522,17 +523,14 @@ def login_view(request):
                 upsert=True,
             )
 
-            system_messages = messages.get_messages(request)
-            system_messages.used = True
+            # Descarta qualquer mensagem pendente (ex: aviso de sessão expirada
+            # que foi gerado antes do login e não deve aparecer na tela de boas-vindas).
+            storage = messages.get_messages(request)
+            storage.used = True
 
-            # 3. Agora sim, cria a mensagem única de boas-vindas
-            # Todo funcionário cadastrado por cadastro_funcionario tem first_name
-            # preenchido, mas contas criadas fora desse fluxo (ex: createsuperuser)
-            # podem não ter — sem esse fallback, o login quebrava com IndexError.
             partes_nome = (user.first_name or "").split()
             nome_usuario = partes_nome[0].title() if partes_nome else user.username
             funcao = "Supervisor" if user.is_staff else "Funcionário Comum"
-            messages.success(request, f"Autenticado com sucesso. Bem-vindo, {nome_usuario} ({funcao}).")
 
             proxima_raw = request.GET.get('next', '')
             if proxima_raw and url_has_allowed_host_and_scheme(
@@ -540,8 +538,19 @@ def login_view(request):
                 allowed_hosts={request.get_host()},
                 require_https=request.is_secure(),
             ):
-                return redirect(proxima_raw)
-            return redirect('inicio')
+                proxima_url = proxima_raw
+            else:
+                proxima_url = reverse('inicio')
+
+            # Renderiza a própria página de login com o modal de sucesso visível.
+            # O botão "OK" do modal é um <a href> que redireciona para proxima_url
+            # sem JavaScript inline — o usuário confirma antes de seguir.
+            return render(request, 'login.html', {
+                'login_success': True,
+                'nome_usuario': nome_usuario,
+                'funcao': funcao,
+                'proxima_url': proxima_url,
+            })
         else:
             _registrar_tentativa_falha_login(request, chave_ip, chave_cpf, usuario_cpf)
             restantes = _tentativas_restantes(chave_ip, chave_cpf)

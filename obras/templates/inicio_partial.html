@@ -67,7 +67,7 @@
 </div>
 
 <!-- Link público + aviso -->
-<div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 20px;">
+<div style="display: flex; flex-direction: column; align-items: center; gap: 8px; margin-bottom: 20px;">
     <a hx-get="{% url 'lista_obras' %}" hx-target="#conteudo-dinamico" hx-swap="innerHTML" hx-push-url="true"
        class="btn-lista-obras"
        style="display: inline-flex; align-items: center; gap: 8px; padding: 10px 20px; background: var(--btn-primary-bg, #3b7dd8); color: #fff; text-decoration: none; border-radius: 8px; font-size: 13.5px; font-weight: 600; transition: opacity 0.15s; cursor: pointer;">

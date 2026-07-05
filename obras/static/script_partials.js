@@ -207,14 +207,78 @@ function initEditaFunc() {
   if (rgInput) rgInput.addEventListener('input', function () { mascaraRG(this); });
 }
 
+/* ── Modal Galeria ── */
+function initModalGaleria() {
+  var overlay = document.getElementById('modal-galeria-overlay');
+  if (!overlay) return;
+
+  function _fecharComEscape(e) {
+    if (e.key === 'Escape') fecharModalGaleria();
+  }
+
+  function fecharModalGaleria() {
+    document.removeEventListener('keydown', _fecharComEscape);
+    var container = document.getElementById('container-modal-galeria');
+    if (container) container.innerHTML = '';
+  }
+
+  var btnFechar = document.getElementById('btn-fechar-galeria');
+  if (btnFechar) btnFechar.addEventListener('click', fecharModalGaleria);
+
+  overlay.addEventListener('click', function (e) {
+    if (e.target === this) fecharModalGaleria();
+  });
+
+  /* { once: true } garante no máximo um listener ativo por vez,
+     mesmo se HTMX reinjectar o fragmento sem fechar o modal anterior. */
+  document.addEventListener('keydown', _fecharComEscape, { once: true });
+
+  /* Delegação para as fotos — evita onclick inline em cada <img> */
+  overlay.addEventListener('click', function (e) {
+    var img = e.target.closest('img.foto-galeria');
+    if (img) abrirLightbox(img.src);
+  });
+
+  function abrirLightbox(src) {
+    /* Remove o listener do modal antes de abrir o lightbox, para que
+       Escape feche apenas o lightbox — não o modal inteiro simultaneamente. */
+    document.removeEventListener('keydown', _fecharComEscape);
+
+    var lb = document.createElement('div');
+    lb.id = 'lightbox-fullscreen';
+    lb.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.95);z-index:10000;display:flex;align-items:center;justify-content:center;cursor:zoom-out;';
+
+    var imgEl = document.createElement('img');
+    imgEl.src = src;
+    imgEl.style.cssText = 'max-width:90%;max-height:90vh;border-radius:6px;object-fit:contain;box-shadow:0 0 40px rgba(0,0,0,0.8);';
+    lb.appendChild(imgEl);
+
+    function _fecharLightbox() {
+      document.removeEventListener('keydown', _escapeDoLightbox);
+      lb.remove();
+      /* Restaura o listener do modal depois que o lightbox fecha. */
+      document.addEventListener('keydown', _fecharComEscape, { once: true });
+    }
+
+    function _escapeDoLightbox(e) {
+      if (e.key === 'Escape') _fecharLightbox();
+    }
+
+    lb.addEventListener('click', _fecharLightbox);
+    document.addEventListener('keydown', _escapeDoLightbox);
+    document.body.appendChild(lb);
+  }
+}
+
 /* ── Dispatcher ── */
 function initPartial() {
-  if (document.getElementById('form-login'))           initLogin();
-  if (document.getElementById('cpf-busca-func'))       initBuscaFunc();
-  if (document.getElementById('form-cadastro-obras'))  initCadastroObras();
-  if (document.getElementById('form-cadastro-func'))   initCadastroFunc();
-  if (document.getElementById('form-edita-obra'))      initEditaObra();
-  if (document.getElementById('form-edita-func'))      initEditaFunc();
+  if (document.getElementById('form-login'))             initLogin();
+  if (document.getElementById('cpf-busca-func'))         initBuscaFunc();
+  if (document.getElementById('form-cadastro-obras'))    initCadastroObras();
+  if (document.getElementById('form-cadastro-func'))     initCadastroFunc();
+  if (document.getElementById('form-edita-obra'))        initEditaObra();
+  if (document.getElementById('form-edita-func'))        initEditaFunc();
+  if (document.getElementById('modal-galeria-overlay'))  initModalGaleria();
 }
 
 document.addEventListener('DOMContentLoaded', initPartial);
