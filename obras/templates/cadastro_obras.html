@@ -17,11 +17,12 @@
         </div>
       </div>
       <div class="divider" style="margin-top: 0;"></div>
-      <form hx-post="{% url 'Cadastro-Obras' %}"
+      <form id="form-cadastro-obras"
+            hx-post="{% url 'Cadastro-Obras' %}"
             hx-target="#conteudo-dinamico"
             hx-encoding="multipart/form-data"
             hx-indicator="#btn-salvar"
-            hx-confirm="Confirma o cadastro desta obra?">
+            hx-trigger="confirmar-cadastro">
         {% csrf_token %}
         <input type="hidden" name="form_token" value="{{ form_token }}">
 
@@ -131,12 +132,56 @@
 
         <div class="btn-row">
           <button type="button" class="btn-ghost" onclick="limparForm()">Limpar</button>
-          <button type="submit" id="btn-salvar" name="btn-salvar" class="btn-primary">
+          <button type="button" id="btn-salvar" name="btn-salvar" class="btn-primary" onclick="abrirModalCadastro()">
             <span class="texto-botao">Salvar Obra</span>
             <div class="spinner-loading"></div>
           </button>
         </div>
       </form>
+    </div>
+  </div>
+</div>
+
+<!-- Modal de confirmação de cadastro -->
+<div id="modal-confirma-cadastro" style="display:none; position:fixed; inset:0; z-index:9999; align-items:center; justify-content:center;">
+  <div id="modal-backdrop" style="position:absolute; inset:0; background:rgba(0,0,0,0.45); backdrop-filter:blur(2px);"></div>
+  <div style="
+    position:relative; z-index:1;
+    background:var(--dropdown-bg, #fff);
+    border:1px solid var(--dropdown-divider, #eaf0f8);
+    border-radius:12px;
+    box-shadow:0 8px 32px rgba(0,0,0,0.18);
+    padding:32px 28px 24px;
+    max-width:420px; width:calc(100% - 32px);
+    text-align:center;
+  ">
+    <div style="
+      width:48px; height:48px; border-radius:50%;
+      background:var(--dropdown-icon-bg, #e8f1fb);
+      display:flex; align-items:center; justify-content:center;
+      margin:0 auto 16px;
+    ">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#4589C8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22Z"/>
+        <path d="M12 8v4M12 16h.01"/>
+      </svg>
+    </div>
+    <div style="font-size:1.1rem; font-weight:700; color:var(--dropdown-text, #2c4a6e); margin-bottom:8px;">Confirmar cadastro</div>
+    <div style="font-size:0.9rem; color:var(--welcome-text, #6b8aaa); line-height:1.5; margin-bottom:24px;">
+      Verifique os dados antes de confirmar. Após salvar, a obra será registrada no sistema e na planilha.
+    </div>
+    <div style="display:flex; gap:12px; justify-content:center;">
+      <button id="modal-cancelar" type="button" style="
+        flex:1; padding:10px 0; border-radius:8px; font-size:0.95rem; font-weight:600; cursor:pointer;
+        border:1px solid var(--dropdown-divider, #ddd);
+        background:transparent; color:var(--dropdown-text, #2c4a6e);
+        transition:background .15s;
+      ">Voltar e revisar</button>
+      <button id="modal-confirmar" type="button" style="
+        flex:1; padding:10px 0; border-radius:8px; font-size:0.95rem; font-weight:600; cursor:pointer;
+        border:none; background:#4589C8; color:#fff;
+        transition:background .15s;
+      ">Confirmar cadastro</button>
     </div>
   </div>
 </div>
@@ -162,6 +207,28 @@
     v = v.replace(/(\d{4})(\d)/, "$1-$2");
     campo.value = v;
   }
+
+  /* ── Modal de confirmação ── */
+  var _modalCadastro = document.getElementById('modal-confirma-cadastro');
+  var _formCadastro  = document.getElementById('form-cadastro-obras');
+
+  function abrirModalCadastro() {
+    _modalCadastro.style.display = 'flex';
+    document.getElementById('modal-confirmar').focus();
+  }
+  function fecharModalCadastro() {
+    _modalCadastro.style.display = 'none';
+  }
+
+  document.getElementById('modal-confirmar').addEventListener('click', function () {
+    fecharModalCadastro();
+    htmx.trigger(_formCadastro, 'confirmar-cadastro');
+  });
+  document.getElementById('modal-cancelar').addEventListener('click', fecharModalCadastro);
+  document.getElementById('modal-backdrop').addEventListener('click', fecharModalCadastro);
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && _modalCadastro.style.display === 'flex') fecharModalCadastro();
+  });
 
   /* ── Máscara de Valor R$ ── */
   document.getElementById('valorObra').addEventListener('input', function () {

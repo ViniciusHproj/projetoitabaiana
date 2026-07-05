@@ -22,7 +22,7 @@
       <button type="button" id="btn-login-edit" class="tab-btn" onclick="mostrarAbaEdit('login')">Dados de Login</button>
     </div>
 
-    <form hx-post="{% url 'salva_edicao_funcionario' %}" hx-target="#conteudo-dinamico" hx-indicator="#btn-salvar-alteracoes" hx-confirm="Confirma as alterações deste funcionário?">
+    <form id="form-edita-func" hx-post="{% url 'salva_edicao_funcionario' %}" hx-target="#conteudo-dinamico" hx-indicator="#btn-salvar-alteracoes" hx-trigger="confirmar-edita-func">
       {% csrf_token %}
       <input type="hidden" name="form_token" value="{{ form_token }}">
       <input type="hidden" name="CPF_ORIGINAL" value="{{ funcionario.CPF }}">
@@ -73,7 +73,7 @@
 
         <div class="btn-row" style="margin-top: 1.25rem;">
           <button type="button" class="btn-ghost" onclick="mostrarAbaEdit('dados')">← Voltar</button>
-          <button type="submit" id="btn-salvar-alteracoes" name="btn-salvar" class="btn-primary">
+          <button type="button" id="btn-salvar-alteracoes" name="btn-salvar" class="btn-primary" onclick="abrirModalEditaFunc()">
             <span class="texto-botao">Salvar Alterações</span>
             <div class="spinner-loading"></div>
           </button>
@@ -110,7 +110,45 @@
   }
 </style>
 
+<!-- Modal de confirmação -->
+<div id="modal-edita-func" style="display:none; position:fixed; inset:0; z-index:9999; align-items:center; justify-content:center;">
+  <div id="modal-backdrop-edita-func" style="position:absolute; inset:0; background:rgba(0,0,0,0.45); backdrop-filter:blur(2px);"></div>
+  <div style="position:relative; z-index:1; background:var(--dropdown-bg,#fff); border:1px solid var(--dropdown-divider,#eaf0f8); border-radius:12px; box-shadow:0 8px 32px rgba(0,0,0,0.18); padding:32px 28px 24px; max-width:420px; width:calc(100% - 32px); text-align:center;">
+    <div style="width:48px; height:48px; border-radius:50%; background:var(--dropdown-icon-bg,#e8f1fb); display:flex; align-items:center; justify-content:center; margin:0 auto 16px;">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#4589C8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22Z"/>
+        <path d="M12 8v4M12 16h.01"/>
+      </svg>
+    </div>
+    <div style="font-size:1.1rem; font-weight:700; color:var(--dropdown-text,#2c4a6e); margin-bottom:8px;">Confirmar alterações</div>
+    <div style="font-size:0.9rem; color:var(--welcome-text,#6b8aaa); line-height:1.5; margin-bottom:24px;">Verifique os dados antes de salvar. As alterações serão aplicadas imediatamente ao perfil do funcionário.</div>
+    <div style="display:flex; gap:12px; justify-content:center;">
+      <button onclick="fecharModalEditaFunc()" type="button" style="flex:1; padding:10px 0; border-radius:8px; font-size:0.95rem; font-weight:600; cursor:pointer; border:1px solid var(--dropdown-divider,#ddd); background:transparent; color:var(--dropdown-text,#2c4a6e);">Voltar e revisar</button>
+      <button id="modal-confirmar-edita-func" type="button" style="flex:1; padding:10px 0; border-radius:8px; font-size:0.95rem; font-weight:600; cursor:pointer; border:none; background:#4589C8; color:#fff;">Confirmar alterações</button>
+    </div>
+  </div>
+</div>
+
 <script>
+  var _modalEditaFunc = document.getElementById('modal-edita-func');
+  var _formEditaFunc  = document.getElementById('form-edita-func');
+
+  function abrirModalEditaFunc() {
+    _modalEditaFunc.style.display = 'flex';
+    document.getElementById('modal-confirmar-edita-func').focus();
+  }
+  function fecharModalEditaFunc() {
+    _modalEditaFunc.style.display = 'none';
+  }
+  document.getElementById('modal-confirmar-edita-func').addEventListener('click', function () {
+    fecharModalEditaFunc();
+    htmx.trigger(_formEditaFunc, 'confirmar-edita-func');
+  });
+  document.getElementById('modal-backdrop-edita-func').addEventListener('click', fecharModalEditaFunc);
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && _modalEditaFunc.style.display === 'flex') fecharModalEditaFunc();
+  });
+
   function mascaraRG(input) {
     let v = input.value.replace(/\D/g, "");
     if (v.length <= 9) {
