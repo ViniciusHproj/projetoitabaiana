@@ -142,6 +142,34 @@ LOGIN_MAX_TENTATIVAS = 5
 LOGIN_JANELA_BLOQUEIO_SEGUNDOS = 15 * 60  # 15 minutos
 LOGIN_BLOQUEIOS_PARA_ALERTA = 3  # nº de bloqueios na mesma conta em 24h que dispara alerta de ataque direcionado
 MAX_FOTOS_POR_ENVIO = 10  # limite de fotos por cadastro/edição de obra
+MAX_TAMANHO_FOTO_BYTES = 10 * 1024 * 1024  # 10 MB por arquivo
+_EXTENSOES_FOTO_PERMITIDAS = {'.jpg', '.jpeg', '.png', '.webp', '.gif'}
+# Magic bytes para cada formato permitido (offset 0, exceto PNG que tem 8 bytes)
+_MAGIC_BYTES_FOTO = [
+    (b'\xff\xd8\xff', 'JPEG'),
+    (b'\x89PNG\r\n\x1a\n', 'PNG'),
+    (b'GIF87a', 'GIF'),
+    (b'GIF89a', 'GIF'),
+    (b'RIFF', 'WEBP'),  # WEBP: RIFF....WEBP — checagem adicional abaixo
+]
+
+
+def _validar_foto(foto):
+    """Retorna None se a foto é válida, ou uma string de erro se não for."""
+    ext = os.path.splitext(foto.name)[1].lower()
+    if ext not in _EXTENSOES_FOTO_PERMITIDAS:
+        return f'Tipo de arquivo "{ext}" não permitido. Use JPG, PNG, WEBP ou GIF.'
+    if foto.size > MAX_TAMANHO_FOTO_BYTES:
+        mb = foto.size / (1024 * 1024)
+        return f'Arquivo "{foto.name}" muito grande ({mb:.1f} MB). Máximo 10 MB por foto.'
+    cabecalho = foto.read(12)
+    foto.seek(0)
+    for magic, nome in _MAGIC_BYTES_FOTO:
+        if cabecalho.startswith(magic):
+            if nome == 'WEBP' and cabecalho[8:12] != b'WEBP':
+                continue
+            return None
+    return f'O arquivo "{foto.name}" não é uma imagem válida.'
 
 
 def _ip_do_cliente(request):
@@ -1058,6 +1086,11 @@ def cadastro_obras(request):
         if len(fotos_arquivos) > MAX_FOTOS_POR_ENVIO:
             return _render_cadastro(f"Envie no máximo {MAX_FOTOS_POR_ENVIO} fotos por cadastro.")
 
+        for foto in fotos_arquivos:
+            erro_foto = _validar_foto(foto)
+            if erro_foto:
+                return _render_cadastro(erro_foto)
+
         if not validar_cnpj(cnpj_empresa.replace('.', '').replace('/', '').replace('-', '')):
             return _render_cadastro("O CNPJ informado é inválido.")
 
@@ -1284,6 +1317,11 @@ def salva_edicao_obra(request):
 
         if len(fotos_novas_arquivos) > MAX_FOTOS_POR_ENVIO:
             return _render_edicao(f"Envie no máximo {MAX_FOTOS_POR_ENVIO} fotos por vez.")
+
+        for foto in fotos_novas_arquivos:
+            erro_foto = _validar_foto(foto)
+            if erro_foto:
+                return _render_edicao(erro_foto)
 
         if not validar_cnpj(cnpj_empresa.replace('.', '').replace('/', '').replace('-', '')):
             return _render_edicao("O CNPJ informado é inválido.")

@@ -178,6 +178,10 @@ if not DEBUG:
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     SECURE_HSTS_PRELOAD = True
 
+# Limite de upload: 10 fotos × 10 MB = 100 MB máximo por request
+DATA_UPLOAD_MAX_MEMORY_SIZE = 105_906_176  # ~101 MB
+FILE_UPLOAD_MAX_MEMORY_SIZE = 10_485_760   # 10 MB por arquivo
+
 # Configuração do Cloudinary para o upload de imagens
 cloudinary.config(
   cloud_name = os.environ['CLOUDINARY_CLOUD_NAME'],
