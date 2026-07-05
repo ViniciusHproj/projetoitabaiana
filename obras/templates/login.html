@@ -52,19 +52,7 @@
                 <div class="spinner-loading"></div>
             </button>
         </form>
-        <script>
-            // O login é um <form> comum (sem HTMX), então a classe .htmx-request
-            // não aparece sozinha como nos outros formulários do sistema — aqui
-            // adicionamos ela manualmente no botão pra reaproveitar o mesmo
-            // spinner/estado "desabilitado" via CSS já existente.
-            document.getElementById('form-login').addEventListener('submit', function () {
-                var botao = document.getElementById('btn-login-submit');
-                botao.classList.add('htmx-request');
-                botao.disabled = true;
-            });
-        </script>
-
-        <a href="{% url 'inicio' %}" style="display: block; margin-top: 25px; color: #6c757d; text-decoration: none; font-size: 0.9em;">
+<a href="{% url 'inicio' %}" style="display: block; margin-top: 25px; color: #6c757d; text-decoration: none; font-size: 0.9em;">
             ← Voltar para o Início
         </a>
     </div>

@@ -1,9 +1,44 @@
+import uuid
+
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import logout as auth_logout
 from django.http import HttpResponse
 from django.shortcuts import redirect
 from django.urls import reverse
+
+
+class CSPNonceMiddleware:
+    """
+    Gera um nonce aleatório por request e o injeta em:
+      - request.csp_nonce  (acessível nos templates via {{ request.csp_nonce }})
+      - Content-Security-Policy-Report-Only header na resposta
+
+    Usando Report-Only enquanto os partials ainda estão sendo migrados
+    (não bloqueia scripts, apenas reporta violações no console do navegador).
+    Será trocado para Content-Security-Policy na Parte 4 da migração CSP,
+    quando todos os scripts inline dos partials forem movidos para JS externo.
+    """
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        request.csp_nonce = uuid.uuid4().hex
+        response = self.get_response(request)
+        nonce = request.csp_nonce
+        csp = (
+            "default-src 'self'; "
+            f"script-src 'self' 'nonce-{nonce}'; "
+            "style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' data: res.cloudinary.com; "
+            "font-src 'self'; "
+            "connect-src 'self'; "
+            "frame-src https://datastudio.google.com https://lookerstudio.google.com; "
+            "object-src 'none';"
+        )
+        response['Content-Security-Policy-Report-Only'] = csp
+        return response
 
 
 class SessaoExpiradaMiddleware:

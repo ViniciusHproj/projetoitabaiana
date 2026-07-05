@@ -84,7 +84,7 @@
 
         <div class="field full">
           <label>Cnpj da Empresa</label>
-          <input value="{{ obra.CNPJ_EMPRESA|default:'' }}" type="text" name="CNPJ_EMPRESA" id="cnpj_edit" maxlength="18" oninput="mascaraCNPJ(this)">
+          <input value="{{ obra.CNPJ_EMPRESA|default:'' }}" type="text" name="CNPJ_EMPRESA" id="cnpj_edit" maxlength="18">
         </div>
 
         <div class="field full">
@@ -100,8 +100,8 @@
       </div>
 
       <div class="btn-row">
-        <button type="button" class="btn-ghost" onclick="window.location.reload()">Cancelar</button>
-        <button type="button" id="btn-salvar-alteracoes" name="btn-salvar" class="btn-primary" onclick="abrirModalEditaObra()">
+        <button type="button" id="btn-cancelar-edita-obra" class="btn-ghost">Cancelar</button>
+        <button type="button" id="btn-salvar-alteracoes" name="btn-salvar" class="btn-primary">
           <span class="texto-botao">Salvar Alterações</span>
           <div class="spinner-loading"></div>
         </button>
@@ -123,46 +123,9 @@
     <div style="font-size:1.1rem; font-weight:700; color:var(--dropdown-text,#2c4a6e); margin-bottom:8px;">Confirmar alterações</div>
     <div style="font-size:0.9rem; color:var(--welcome-text,#6b8aaa); line-height:1.5; margin-bottom:24px;">Verifique os dados antes de salvar. As alterações serão registradas no sistema e sincronizadas com a planilha.</div>
     <div style="display:flex; gap:12px; justify-content:center;">
-      <button onclick="fecharModalEditaObra()" type="button" style="flex:1; padding:10px 0; border-radius:8px; font-size:0.95rem; font-weight:600; cursor:pointer; border:1px solid var(--dropdown-divider,#ddd); background:transparent; color:var(--dropdown-text,#2c4a6e);">Voltar e revisar</button>
+      <button id="btn-fechar-modal-edita-obra" type="button" style="flex:1; padding:10px 0; border-radius:8px; font-size:0.95rem; font-weight:600; cursor:pointer; border:1px solid var(--dropdown-divider,#ddd); background:transparent; color:var(--dropdown-text,#2c4a6e);">Voltar e revisar</button>
       <button id="modal-confirmar-edita-obra" type="button" style="flex:1; padding:10px 0; border-radius:8px; font-size:0.95rem; font-weight:600; cursor:pointer; border:none; background:#4589C8; color:#fff;">Confirmar alterações</button>
     </div>
   </div>
 </div>
 
-<script>
-  var _modalEditaObra = document.getElementById('modal-edita-obra');
-  var _formEditaObra  = document.getElementById('form-edita-obra');
-
-  function abrirModalEditaObra() {
-    _modalEditaObra.style.display = 'flex';
-    document.getElementById('modal-confirmar-edita-obra').focus();
-  }
-  function fecharModalEditaObra() {
-    _modalEditaObra.style.display = 'none';
-  }
-  document.getElementById('modal-confirmar-edita-obra').addEventListener('click', function () {
-    fecharModalEditaObra();
-    htmx.trigger(_formEditaObra, 'confirmar-edita-obra');
-  });
-  document.getElementById('modal-backdrop-edita-obra').addEventListener('click', fecharModalEditaObra);
-  document.addEventListener('keydown', function (e) {
-    if (e.key === 'Escape' && _modalEditaObra.style.display === 'flex') fecharModalEditaObra();
-  });
-
-  // Máscara de Valor igual ao cadastro
-  document.getElementById('valorObraEdit').addEventListener('input', function () {
-    let v = this.value.replace(/\D/g, '');
-    if (!v) { this.value = ''; return; }
-    const n = parseInt(v) / 100;
-    this.value = n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  });
-
-  function mascaraCNPJ(campo) {
-    let v = campo.value.replace(/\D/g, "");
-    v = v.replace(/^(\d{2})(\d)/, "$1.$2");
-    v = v.replace(/^(\d{2})\.(\d{3})(\d)/, "$1.$2.$3");
-    v = v.replace(/\.(\d{3})(\d)/, ".$1/$2");
-    v = v.replace(/(\d{4})(\d)/, "$1-$2");
-    campo.value = v;
-  }
-</script>

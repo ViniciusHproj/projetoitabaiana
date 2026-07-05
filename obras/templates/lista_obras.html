@@ -1,6 +1,7 @@
 {% load static %}
 <div data-pagina-scroll hidden></div>
 <style>
+    .foto-obra-card:hover { opacity: 0.8; }
     .container-obras {
         padding: 20px;
         max-width: 1200px;
@@ -87,8 +88,8 @@
                          hx-get="{% url 'galeria_obra' obra.ID_OBRA %}"
                          hx-target="#container-modal-galeria"
                          hx-indicator="#spinner-galeria-{{ obra.ID_OBRA }}"
+                         class="foto-obra-card"
                          style="width: 100%; height: 200px; object-fit: cover; border-radius: 6px; margin-bottom: 4px; cursor: pointer; transition: opacity 0.2s;"
-                         onmouseover="this.style.opacity=0.8" onmouseout="this.style.opacity=1"
                          title="Clique para ver a galeria completa">
                     <div id="spinner-galeria-{{ obra.ID_OBRA }}" class="spinner-overlay">
                         <div class="spinner-loading-grande"></div>

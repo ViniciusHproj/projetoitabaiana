@@ -111,7 +111,7 @@
             <input value="{{ dados.CNPJ_EMPRESA|default:'' }}" 
                    type="text" name="CNPJ_EMPRESA" id="cnpj_empresa" 
                    placeholder="00.000.000/0001-00" 
-                   maxlength="18" oninput="mascaraCNPJ(this)">
+                   maxlength="18">
           </div>
 
           <div class="field full">
@@ -131,8 +131,8 @@
         </div>
 
         <div class="btn-row">
-          <button type="button" class="btn-ghost" onclick="limparForm()">Limpar</button>
-          <button type="button" id="btn-salvar" name="btn-salvar" class="btn-primary" onclick="abrirModalCadastro()">
+          <button type="button" id="btn-limpar-obras" class="btn-ghost">Limpar</button>
+          <button type="button" id="btn-salvar" name="btn-salvar" class="btn-primary">
             <span class="texto-botao">Salvar Obra</span>
             <div class="spinner-loading"></div>
           </button>
@@ -186,58 +186,3 @@
   </div>
 </div>
 
-<script>
-  /* ── Limpar formulário corrigido ── */
-  function limparForm() {
-    // Adicionado o 'idObraManual' e os outros IDs que faltavam no reset
-    const campos = ['idObraManual','tipoObra','situacao','tipoExecucao','valorObra','dataInicio','conclusaoPrevista','dataFinalizacao','nomeEmpresa','endereco','cnpj_empresa', 'fotoObra'];
-    campos.forEach(id => { 
-        const el = document.getElementById(id);
-        if(el) el.value = ''; 
-    });
-  }
-
-  /* ── Máscara CNPJ ── */
-  function mascaraCNPJ(campo) {
-    let v = campo.value.replace(/\D/g, "");
-    if (v.length > 14) v = v.slice(0, 14);
-    v = v.replace(/^(\d{2})(\d)/, "$1.$2");
-    v = v.replace(/^(\d{2})\.(\d{3})(\d)/, "$1.$2.$3");
-    v = v.replace(/\.(\d{3})(\d)/, ".$1/$2");
-    v = v.replace(/(\d{4})(\d)/, "$1-$2");
-    campo.value = v;
-  }
-
-  /* ── Modal de confirmação ── */
-  var _modalCadastro = document.getElementById('modal-confirma-cadastro');
-  var _formCadastro  = document.getElementById('form-cadastro-obras');
-
-  function abrirModalCadastro() {
-    _modalCadastro.style.display = 'flex';
-    document.getElementById('modal-confirmar').focus();
-  }
-  function fecharModalCadastro() {
-    _modalCadastro.style.display = 'none';
-  }
-
-  document.getElementById('modal-confirmar').addEventListener('click', function () {
-    fecharModalCadastro();
-    htmx.trigger(_formCadastro, 'confirmar-cadastro');
-  });
-  document.getElementById('modal-cancelar').addEventListener('click', fecharModalCadastro);
-  document.getElementById('modal-backdrop').addEventListener('click', fecharModalCadastro);
-  document.addEventListener('keydown', function (e) {
-    if (e.key === 'Escape' && _modalCadastro.style.display === 'flex') fecharModalCadastro();
-  });
-
-  /* ── Máscara de Valor R$ ── */
-  document.getElementById('valorObra').addEventListener('input', function () {
-    let v = this.value.replace(/\D/g, '');
-    if (!v) { this.value = ''; return; }
-    const n = parseInt(v) / 100;
-    this.value = n.toLocaleString('pt-BR', {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2
-    });
-  });
-</script>
