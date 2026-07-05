@@ -56,9 +56,9 @@ obras/
   views.py             # toda a lógica de negócio (cadastro, login, validações, etc.)
   middleware.py        # sessão expirada por inatividade + sessão única por usuário
   utils.py             # helpers de formatação de data compartilhados
-  tests.py             # suite de 36 testes automatizados
+  tests.py             # suite de 181 testes automatizados
   templates/           # templates HTML (HTMX), um por tela/fragmento
-  static/              # CSS e JS (style_nav.css, style_obras.css, script_menu.js)
+  static/              # CSS, JS e fontes (style_nav.css, style_obras.css, script_partials.js, htmx.min.js)
 manage.py
 requirements.txt
 Procfile               # comando de start usado pelo Render (gunicorn + collectstatic)
@@ -139,6 +139,9 @@ git push origin main
 
 - **Rate-limit de login** persistido no MongoDB (sobrevive a reinícios/deploys do Render) — bloqueio temporário por IP e por CPF após tentativas seguidas erradas, com janela deslizante de 15 minutos. O IP do cliente é lido a partir do **último** valor de `X-Forwarded-For` (o escrito pelo proxy confiável do Render), nunca o primeiro — o primeiro vem do próprio cliente e poderia ser forjado para burlar o bloqueio por IP.
 - **Sessão única por usuário** — um novo login em outro dispositivo encerra a sessão anterior automaticamente, com feedback via `HX-Redirect` para preservar o layout HTMX.
+- **Content-Security-Policy** (CSP) com `nonce` por request — impede execução de qualquer script sem nonce válido, bloqueando XSS mesmo que algum dado fosse injetado na página. Gerado por middleware em `obras/middleware.py`.
+- **Fontes locais** — `DM Sans` servida pelo próprio servidor via WhiteNoise (sem dependência de CDN externo); elimina rastreamento do Google Fonts e falha de fontes por indisponibilidade de CDN.
+- **`ALLOWED_HOSTS` seguro** — configuração via env var; valor vazio ou ausente resulta em lista vazia (não em `['']` que aceitaria qualquer host) graças a filtro explícito de strings vazias.
 - **Validação de CPF e CNPJ** com cálculo real de dígito verificador (não só formato).
 - **Validação de força de senha** (`AUTH_PASSWORD_VALIDATORS`) aplicada explicitamente no cadastro e na troca de senha de funcionários — Django não faz isso automaticamente fora dos formulários prontos dele.
 - **Proteção contra duplo-submit** em todos os formulários de cadastro/edição: trava temporária de debounce (4s funcionário / 12s obra) + token UUID de uso único por renderização.
@@ -149,18 +152,28 @@ git push origin main
 - **HTTPS forçado, cookies seguros e HSTS** em produção.
 - **Controle de acesso por papel** (`is_staff`) verificado em cada view sensível — cadastro/edição de funcionários é restrito a supervisores; cadastro/edição de obras é liberado para qualquer funcionário autenticado (por decisão de negócio).
 - **Rollback manual** de dados do Django em caso de falha no MongoDB em `salva_edicao_funcionario`, para evitar divergência entre os dois bancos.
+- **HTMX servido localmente** (`obras/static/htmx.min.js` v1.9.10) — sem carregamento de script de CDN externo.
 
 ---
 
 ## Testes automatizados
 
 ```powershell
-python manage.py test obras
+python manage.py test obras --keepdb
 ```
 
-A suite (36 testes) cobre: validadores de CPF/CNPJ/RG/datas/valor, a correção de segurança do IP via `X-Forwarded-For`, rate-limit de login, sessão única por usuário, e os fluxos de cadastro/edição de obras e funcionários (incluindo idempotência por `form_token`).
+> **`--keepdb` é obrigatório** após o primeiro setup — sem ele o Django recria o banco de teste do zero e falha com erro de coleção duplicada no MongoDB.
 
-Requer conectividade real com o MongoDB do `.env` — os testes usam um banco de teste à parte no mesmo cluster (`{MONGODB_DB_NAME}_teste`), criado e destruído automaticamente a cada execução; nada é gravado no banco de produção. Upload de fotos (Cloudinary) é mockado, então não precisa de credenciais reais do Cloudinary para rodar.
+A suite (181 testes) cobre: validadores de CPF/CNPJ/RG/datas/valor, a correção de segurança do IP via `X-Forwarded-For`, rate-limit de login, sessão única por usuário, fluxos completos de cadastro/edição de obras e funcionários (incluindo idempotência por `form_token`, validação de magic bytes de upload, e proteção contra duplo-submit), controle de acesso, login com modal de sucesso, e pages públicas.
+
+Requer conectividade real com o MongoDB do `.env` — os testes usam um banco separado no mesmo cluster (`{MONGODB_DB_NAME}_teste`), criado na primeira execução e preservado via `--keepdb`; nada é gravado no banco de produção. Upload de fotos (Cloudinary) é mockado, então não precisa de credenciais reais do Cloudinary para rodar.
+
+**Primeiro setup em uma máquina nova:**
+
+```powershell
+$env:MONGODB_DB_NAME="test_Banco_Projeto"; python manage.py migrate
+python manage.py test obras --keepdb
+```
 
 ---
 

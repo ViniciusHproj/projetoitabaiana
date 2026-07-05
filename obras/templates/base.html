@@ -161,7 +161,7 @@
     <div class="sidebar-user-card">
       <div class="sidebar-avatar">{{ user.first_name|first|upper|default:user.username|first|upper }}</div>
       <div>
-        <div class="sidebar-username">{{ user.first_name|default:user.username }}</div>
+        <div class="sidebar-username" title="{{ user.first_name|default:user.username }}">{{ user.first_name|default:user.username }}</div>
         <div class="sidebar-role">{% if user.is_staff or user.is_superuser %}Supervisor{% else %}Funcionário{% endif %}</div>
       </div>
     </div>
@@ -176,6 +176,28 @@
     </form>
     {% endif %}
   </div>
+  <script nonce="{{ request.csp_nonce }}">
+  (function () {
+    var el = document.querySelector('.sidebar-username');
+    if (!el) return;
+    el.addEventListener('mouseenter', function () {
+      if (el.scrollWidth <= el.clientWidth) return;
+      var span = document.createElement('span');
+      span.textContent = el.textContent;
+      el.textContent = '';
+      el.appendChild(span);
+      el.style.textOverflow = 'clip';
+      span.style.display = 'inline-block';
+      span.style.animation = 'marquee-nome 3s linear infinite';
+    });
+    el.addEventListener('mouseleave', function () {
+      var span = el.querySelector('span');
+      if (!span) return;
+      el.textContent = span.textContent;
+      el.style.textOverflow = '';
+    });
+  })();
+  </script>
 
 </aside>
 

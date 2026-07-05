@@ -279,6 +279,15 @@ body {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    max-width: 145px;
+    cursor: default;
+}
+
+@keyframes marquee-nome {
+    0%   { transform: translateX(0); }
+    25%  { transform: translateX(0); }
+    75%  { transform: translateX(calc(-100% + 145px)); }
+    100% { transform: translateX(calc(-100% + 145px)); }
 }
 
 .sidebar-role {

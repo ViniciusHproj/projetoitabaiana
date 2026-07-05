@@ -21,7 +21,8 @@ cluster do .env) — não é um mock de rede, é um banco de teste de verdade.
 import os
 from unittest.mock import patch
 
-from django.contrib.auth.models import User
+from django.contrib.auth.models import User, update_last_login
+from django.contrib.auth.signals import user_logged_in
 from django.test import Client, RequestFactory, TestCase
 from pymongo import MongoClient
 
@@ -137,6 +138,14 @@ class MongoTesteBase(TestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
+        # Com --keepdb, o banco de teste é preservado entre execuções. Se o
+        # último teste de uma execução anterior deixou usuários Django no banco
+        # de teste, a próxima execução falharia com IntegrityError (dup key) ao
+        # tentar recriar o mesmo usuário. Flush garante estado limpo para a
+        # classe inteira antes de começar, sem depender do teardown da execução
+        # anterior ter funcionado.
+        from django.core.management import call_command
+        call_command("flush", "--no-input", verbosity=0)
         # Avaliado aqui (não no corpo da classe) para não quebrar import sem .env.
         cls.NOME_BANCO_TESTE = f"{os.environ['MONGODB_DB_NAME']}_teste"
         cls._mongo_client_teste = MongoClient(os.environ["MONGODB_URI"])
@@ -152,6 +161,12 @@ class MongoTesteBase(TestCase):
         # para que o comportamento testado seja fiel ao real.
         cls.colecao_obras.create_index("ID_OBRA", unique=True)
         cls.colecao_seguranca_login.create_index("expira_em", expireAfterSeconds=0)
+
+        # update_last_login tenta chamar user.save(update_fields=["last_login"])
+        # após cada force_login/login. Com django_mongodb_backend + Django 6, isso
+        # falha com User.NotUpdated. O signal foi registrado com dispatch_uid=
+        # 'update_last_login', então é preciso usar o mesmo uid para desconectar.
+        user_logged_in.disconnect(dispatch_uid='update_last_login')
 
         # Troca as coleções que obras/views.py usa globalmente, só durante
         # esta classe de teste.
@@ -173,10 +188,24 @@ class MongoTesteBase(TestCase):
             p.stop()
         cls._mongo_client_teste.drop_database(cls.NOME_BANCO_TESTE)
         cls._mongo_client_teste.close()
+        # Reconecta com o mesmo dispatch_uid original para manter idempotência.
+        user_logged_in.connect(update_last_login, dispatch_uid='update_last_login')
         super().tearDownClass()
 
     def setUp(self):
-        # Isola cada teste: começa sempre com as coleções de negócio vazias.
+        # Recria o client a cada teste para garantir que não há cookies de
+        # sessão stale da execução anterior. Depois de um flush(), as sessões
+        # Django são apagadas do banco; se o client reutilizado ainda tiver o
+        # cookie antigo, force_login tenta fazer force_update numa sessão que
+        # não existe mais → Session.NotUpdated.
+        self.client = Client()
+        # Isola cada teste: começa sempre com as coleções de negócio e usuários
+        # Django vazios. O MongoDB não suporta rollback real de transações como
+        # bancos SQL, então o Django não consegue desfazer INSERTs de User
+        # automaticamente entre testes — sem esse delete explícito, o segundo
+        # setUp() de uma mesma classe tenta criar um User com o mesmo username
+        # que o primeiro já inseriu, gerando IntegrityError.
+        User.objects.all().delete()
         self.colecao_obras.delete_many({})
         self.colecao_funcionarios.delete_many({})
         self.colecao_timelapse.delete_many({})
@@ -195,7 +224,8 @@ class LoginRateLimitTestCase(MongoTesteBase):
     def test_login_com_credenciais_corretas_funciona(self):
         resposta = self.client.post("/login/", {"username": self.cpf, "password": SENHA_FORTE})
         self.assertTrue(self.client.session.get("_auth_user_id"))
-        self.assertRedirects(resposta, "/inicio/")
+        # Login bem-sucedido agora renderiza modal de confirmação (200) em vez de redirecionar.
+        self.assertEqual(resposta.status_code, 200)
 
     def test_login_com_senha_errada_nao_autentica(self):
         resposta = self.client.post("/login/", {"username": self.cpf, "password": "senha-errada"})
@@ -264,7 +294,7 @@ class LoginRateLimitTestCase(MongoTesteBase):
             HTTP_X_FORWARDED_FOR="2.2.2.2",
         )
         self.assertTrue(self.client.session.get("_auth_user_id"))
-        self.assertRedirects(resposta, "/inicio/")
+        self.assertEqual(resposta.status_code, 200)
 
 
 class SessaoUnicaTestCase(MongoTesteBase):
@@ -982,9 +1012,11 @@ class LoginViewTestCase(MongoTesteBase):
     # Fluxo feliz
     # ------------------------------------------------------------------
 
-    def test_login_correto_redireciona_para_inicio(self):
+    def test_login_correto_exibe_modal_sucesso(self):
+        # Login bem-sucedido renderiza modal de confirmação (200) em vez de redirecionar.
         resposta = self.client.post("/login/", {"username": self.cpf, "password": SENHA_FORTE})
-        self.assertRedirects(resposta, "/inicio/")
+        self.assertEqual(resposta.status_code, 200)
+        self.assertTrue(resposta.context.get("login_success"))
 
     def test_login_correto_autentica_sessao(self):
         self.client.post("/login/", {"username": self.cpf, "password": SENHA_FORTE})
@@ -994,22 +1026,27 @@ class LoginViewTestCase(MongoTesteBase):
         """CPF com formatação visual deve ser limpo e autenticar normalmente."""
         cpf_formatado = "111.444.777-35"
         resposta = self.client.post("/login/", {"username": cpf_formatado, "password": SENHA_FORTE})
-        self.assertRedirects(resposta, "/inicio/")
+        self.assertEqual(resposta.status_code, 200)
+        self.assertTrue(resposta.context.get("login_success"))
 
-    def test_login_correto_redireciona_para_next_seguro(self):
+    def test_login_correto_next_seguro_incluso_no_contexto(self):
+        """?next= seguro deve aparecer como proxima_url no contexto do modal."""
         resposta = self.client.post(
             "/login/?next=/inicio/",
             {"username": self.cpf, "password": SENHA_FORTE},
         )
-        self.assertRedirects(resposta, "/inicio/")
+        self.assertEqual(resposta.status_code, 200)
+        self.assertEqual(resposta.context.get("proxima_url"), "/inicio/")
 
-    def test_login_next_externo_redireciona_para_inicio(self):
+    def test_login_next_externo_usa_inicio_como_fallback(self):
         """Open redirect: ?next= apontando para domínio externo deve ser ignorado."""
         resposta = self.client.post(
             "/login/?next=http://malicioso.com",
             {"username": self.cpf, "password": SENHA_FORTE},
         )
-        self.assertRedirects(resposta, "/inicio/")
+        self.assertEqual(resposta.status_code, 200)
+        # proxima_url deve ser o fallback seguro, nunca a URL externa.
+        self.assertNotIn("malicioso.com", resposta.context.get("proxima_url", ""))
 
     # ------------------------------------------------------------------
     # Credenciais erradas
@@ -1051,7 +1088,9 @@ class LoginViewTestCase(MongoTesteBase):
         su.first_name = ""
         su.save()
         resposta = self.client.post("/login/", {"username": "00000000191", "password": SENHA_FORTE})
-        self.assertRedirects(resposta, "/inicio/")
+        # Deve retornar 200 (modal de sucesso), não 500 por IndexError no split().
+        self.assertEqual(resposta.status_code, 200)
+        self.assertTrue(resposta.context.get("login_success"))
 
 
 class LogoutViewTestCase(MongoTesteBase):
@@ -1411,4 +1450,410 @@ class PaginasInternasTestCase(MongoTesteBase):
     def test_busca_funcionario_get_supervisor_retorna_200(self):
         self.client.force_login(self.supervisor)
         resposta = self.client.get("/atualizar-funcionario/", HTTP_HX_REQUEST="true")
+        self.assertEqual(resposta.status_code, 200)
+
+
+# ==============================================================================
+# ROTA RAIZ
+# ==============================================================================
+
+class PaginaInicialRaizTestCase(MongoTesteBase):
+    """Cobre pagina_inicial (/) — rota raiz separada de /inicio/."""
+
+    def setUp(self):
+        super().setUp()
+        self.user = User.objects.create_user(
+            username=CPF_VALIDO, password=SENHA_FORTE, first_name="Joao Teste"
+        )
+
+    def test_raiz_sem_login_retorna_200(self):
+        resposta = self.client.get("/")
+        self.assertEqual(resposta.status_code, 200)
+
+    def test_raiz_com_login_retorna_200(self):
+        self.client.force_login(self.user)
+        resposta = self.client.get("/")
+        self.assertEqual(resposta.status_code, 200)
+
+    def test_raiz_htmx_retorna_parcial(self):
+        self.client.force_login(self.user)
+        resposta = self.client.get("/", HTTP_HX_REQUEST="true")
+        self.assertEqual(resposta.status_code, 200)
+
+
+# ==============================================================================
+# VALIDAÇÃO DE UPLOAD DE FOTO
+# ==============================================================================
+
+# Cabeçalhos mínimos para cada formato suportado
+_PNG_MINIMO = b'\x89PNG\r\n\x1a\n' + b'\x00' * 4
+_GIF_MINIMO = b'GIF89a' + b'\x00' * 10
+_WEBP_MINIMO = b'RIFF\x00\x00\x00\x00WEBP' + b'\x00' * 4
+# Arquivo que parece JPEG pela extensão mas tem conteúdo binário aleatório
+_CONTEUDO_INVALIDO = b'\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c'
+
+
+class ValidacaoFotoUploadTestCase(MongoTesteBase):
+    """Cobre _validar_foto via cadastro_obras — extensão, magic bytes e tamanho."""
+
+    def setUp(self):
+        super().setUp()
+        self.user = User.objects.create_user(
+            username=CPF_VALIDO, password=SENHA_FORTE, first_name="Joao Teste"
+        )
+        self.client.force_login(self.user)
+
+    def _dados_obra(self, **overrides):
+        dados = {
+            "btn-salvar": "1",
+            "TIPO_OBRA": "PAVIMENTAÇÃO",
+            "SITUACAO": "Em andamento",
+            "TIPO_EXECUCAO": "Nova Construção",
+            "VALOR_OBRA": "1.000,00",
+            "DATA_INICIO": "2026-01-01",
+            "CONCLUSAO_PREVISTA": "2026-12-31",
+            "DATA_FINALIZACAO": "",
+            "NOME_EMPRESA": "Empresa Teste",
+            "ENDERECO": "Rua de Teste, 123",
+            "CNPJ_EMPRESA": CNPJ_VALIDO,
+            "form_token": _gerar_form_token(),
+        }
+        dados.update(overrides)
+        return dados
+
+    @patch("obras.views.cloudinary.uploader.upload")
+    def _postar_com_foto(self, mock_upload, nome_arquivo, conteudo, content_type="image/jpeg"):
+        mock_upload.return_value = {"secure_url": "https://res.cloudinary.com/teste/foto.jpg"}
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        dados = self._dados_obra()
+        arquivos = {"FOTO_OBRA": SimpleUploadedFile(nome_arquivo, conteudo, content_type=content_type)}
+        return self.client.post("/cadastro-obras/", {**dados, **arquivos})
+
+    def test_jpeg_valido_e_aceito(self):
+        self._postar_com_foto(nome_arquivo="foto.jpg", conteudo=_JPEG_MINIMO)
+        self.assertEqual(self.colecao_obras.count_documents({}), 1)
+
+    def test_png_valido_e_aceito(self):
+        self._postar_com_foto(nome_arquivo="foto.png", conteudo=_PNG_MINIMO, content_type="image/png")
+        self.assertEqual(self.colecao_obras.count_documents({}), 1)
+
+    def test_gif_valido_e_aceito(self):
+        self._postar_com_foto(nome_arquivo="foto.gif", conteudo=_GIF_MINIMO, content_type="image/gif")
+        self.assertEqual(self.colecao_obras.count_documents({}), 1)
+
+    def test_extensao_invalida_e_rejeitada(self):
+        self._postar_com_foto(nome_arquivo="arquivo.exe", conteudo=_JPEG_MINIMO, content_type="application/octet-stream")
+        self.assertEqual(self.colecao_obras.count_documents({}), 0)
+
+    def test_extensao_pdf_e_rejeitada(self):
+        self._postar_com_foto(nome_arquivo="arquivo.pdf", conteudo=b'%PDF-1.4', content_type="application/pdf")
+        self.assertEqual(self.colecao_obras.count_documents({}), 0)
+
+    def test_magic_bytes_invalidos_rejeitam_mesmo_com_extensao_jpg(self):
+        """Extensão .jpg com conteúdo binário inválido deve ser rejeitado."""
+        self._postar_com_foto(nome_arquivo="falso.jpg", conteudo=_CONTEUDO_INVALIDO)
+        self.assertEqual(self.colecao_obras.count_documents({}), 0)
+
+    def test_sem_foto_e_rejeitado(self):
+        dados = self._dados_obra()
+        resposta = self.client.post("/cadastro-obras/", dados)
+        self.assertEqual(self.colecao_obras.count_documents({}), 0)
+
+    def test_mais_de_10_fotos_e_rejeitado(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        dados = self._dados_obra()
+        fotos = [
+            SimpleUploadedFile(f"foto{i}.jpg", _JPEG_MINIMO, content_type="image/jpeg")
+            for i in range(11)
+        ]
+        self.client.post("/cadastro-obras/", {**dados, "FOTO_OBRA": fotos})
+        self.assertEqual(self.colecao_obras.count_documents({}), 0)
+
+
+# ==============================================================================
+# TOKEN DE IDEMPOTÊNCIA — FORMULÁRIOS DE OBRA
+# ==============================================================================
+
+class TokenIdempotenciaObraTestCase(MongoTesteBase):
+    """Token de idempotência para cadastro_obras e salva_edicao_obra."""
+
+    def setUp(self):
+        super().setUp()
+        self.user = User.objects.create_user(
+            username=CPF_VALIDO, password=SENHA_FORTE, first_name="Joao Teste"
+        )
+        self.client.force_login(self.user)
+        # Obra pré-existente para testes de edição
+        self.colecao_obras.insert_one({
+            "ID_OBRA": "12026",
+            "TIPO_OBRA": "PAVIMENTAÇÃO",
+            "SITUACAO": "Em andamento",
+            "TIPO_EXECUCAO": "Nova Construção",
+            "VALOR_OBRA": "1.000,00",
+            "DATA_INICIO": "01/01/2026",
+            "CONCLUSAO_PREVISTA": "31/12/2026",
+            "DATA_FINALIZACAO": "—",
+            "NOME_EMPRESA": "Empresa Original",
+            "CNPJ_EMPRESA": CNPJ_VALIDO,
+            "EMPRESA_CONTRATADA": "EMPRESA ORIGINAL - CNPJ - " + CNPJ_VALIDO,
+            "ENDERECO": "Rua Original, 1",
+        })
+
+    @patch("obras.views.cloudinary.uploader.upload")
+    def test_token_ausente_em_cadastro_obras_e_rejeitado(self, mock_upload):
+        mock_upload.return_value = {"secure_url": "https://res.cloudinary.com/teste/foto.jpg"}
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        dados = {
+            "btn-salvar": "1",
+            "TIPO_OBRA": "PAVIMENTAÇÃO",
+            "SITUACAO": "Em andamento",
+            "TIPO_EXECUCAO": "Nova Construção",
+            "VALOR_OBRA": "1.000,00",
+            "DATA_INICIO": "2026-01-01",
+            "CONCLUSAO_PREVISTA": "2026-12-31",
+            "DATA_FINALIZACAO": "",
+            "NOME_EMPRESA": "Empresa Teste",
+            "ENDERECO": "Rua de Teste, 123",
+            "CNPJ_EMPRESA": CNPJ_VALIDO,
+            # form_token ausente
+        }
+        arquivos = {"FOTO_OBRA": SimpleUploadedFile("foto.jpg", _JPEG_MINIMO, content_type="image/jpeg")}
+        self.client.post("/cadastro-obras/", {**dados, **arquivos})
+        self.assertEqual(self.colecao_obras.count_documents({"NOME_EMPRESA": "Empresa Teste"}), 0)
+
+    @patch("obras.views.cloudinary.uploader.upload")
+    def test_mesmo_token_em_cadastro_obras_cria_apenas_uma_vez(self, mock_upload):
+        mock_upload.return_value = {"secure_url": "https://res.cloudinary.com/teste/foto.jpg"}
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        token = _gerar_form_token()
+        dados = {
+            "btn-salvar": "1",
+            "TIPO_OBRA": "PAVIMENTAÇÃO",
+            "SITUACAO": "Em andamento",
+            "TIPO_EXECUCAO": "Nova Construção",
+            "VALOR_OBRA": "1.000,00",
+            "DATA_INICIO": "2026-01-01",
+            "CONCLUSAO_PREVISTA": "2026-12-31",
+            "DATA_FINALIZACAO": "",
+            "NOME_EMPRESA": "Empresa Token Teste",
+            "ENDERECO": "Rua de Teste, 123",
+            "CNPJ_EMPRESA": CNPJ_VALIDO,
+            "form_token": token,
+        }
+        arquivos = {"FOTO_OBRA": SimpleUploadedFile("foto.jpg", _JPEG_MINIMO, content_type="image/jpeg")}
+        self.client.post("/cadastro-obras/", {**dados, **arquivos})
+        # Segunda submissão com o mesmo token
+        mock_upload.return_value = {"secure_url": "https://res.cloudinary.com/teste/foto2.jpg"}
+        self.client.post("/cadastro-obras/", {**dados, **arquivos})
+        # Só deve ter criado uma obra
+        self.assertEqual(self.colecao_obras.count_documents({"NOME_EMPRESA": "Empresa Token Teste"}), 1)
+
+    def test_token_ausente_em_salva_edicao_obra_e_rejeitado(self):
+        dados = {
+            "ID_OBRA": "12026",
+            "TIPO_OBRA": "PAVIMENTAÇÃO",
+            "SITUACAO": "Em andamento",
+            "TIPO_EXECUCAO": "Nova Construção",
+            "VALOR_OBRA": "2.000,00",
+            "DATA_INICIO": "2026-01-01",
+            "CONCLUSAO_PREVISTA": "2026-12-31",
+            "DATA_FINALIZACAO": "",
+            "NOME_EMPRESA": "Empresa Editada",
+            "ENDERECO": "Rua Editada, 456",
+            "CNPJ_EMPRESA": CNPJ_VALIDO,
+            # form_token ausente
+        }
+        self.client.post("/salvar-edicao-obra/", dados)
+        doc = self.colecao_obras.find_one({"ID_OBRA": "12026"})
+        self.assertEqual(doc["NOME_EMPRESA"], "Empresa Original")
+
+    def test_mesmo_token_em_salva_edicao_obra_salva_apenas_uma_vez(self):
+        token = _gerar_form_token()
+        dados = {
+            "ID_OBRA": "12026",
+            "TIPO_OBRA": "PAVIMENTAÇÃO",
+            "SITUACAO": "Em andamento",
+            "TIPO_EXECUCAO": "Nova Construção",
+            "VALOR_OBRA": "2.000,00",
+            "DATA_INICIO": "2026-01-01",
+            "CONCLUSAO_PREVISTA": "2026-12-31",
+            "DATA_FINALIZACAO": "",
+            "NOME_EMPRESA": "Empresa Editada",
+            "ENDERECO": "Rua Editada, 456",
+            "CNPJ_EMPRESA": CNPJ_VALIDO,
+            "form_token": token,
+        }
+        self.client.post("/salvar-edicao-obra/", dados)
+        # Segunda submissão com token diferente mas campo alterado — só a primeira deve ter salvo
+        dados2 = dict(dados)
+        dados2["form_token"] = token  # mesmo token
+        dados2["NOME_EMPRESA"] = "Empresa Segunda Tentativa"
+        self.client.post("/salvar-edicao-obra/", dados2)
+        doc = self.colecao_obras.find_one({"ID_OBRA": "12026"})
+        # O segundo POST foi bloqueado pelo token reutilizado — nome continua o da primeira edição
+        self.assertEqual(doc["NOME_EMPRESA"], "Empresa Editada")
+
+
+# ==============================================================================
+# EDIÇÃO DE OBRA COM NOVAS FOTOS
+# ==============================================================================
+
+class EdicaoObraComFotoTestCase(MongoTesteBase):
+    """Cobre salva_edicao_obra quando novas fotos são enviadas."""
+
+    def setUp(self):
+        super().setUp()
+        self.user = User.objects.create_user(
+            username=CPF_VALIDO, password=SENHA_FORTE, first_name="Joao Teste"
+        )
+        self.client.force_login(self.user)
+        self.colecao_obras.insert_one({
+            "ID_OBRA": "12026",
+            "TIPO_OBRA": "PAVIMENTAÇÃO",
+            "SITUACAO": "Em andamento",
+            "TIPO_EXECUCAO": "Nova Construção",
+            "VALOR_OBRA": "1.000,00",
+            "DATA_INICIO": "01/01/2026",
+            "CONCLUSAO_PREVISTA": "31/12/2026",
+            "DATA_FINALIZACAO": "—",
+            "NOME_EMPRESA": "Empresa Original",
+            "CNPJ_EMPRESA": CNPJ_VALIDO,
+            "EMPRESA_CONTRATADA": "EMPRESA ORIGINAL - CNPJ - " + CNPJ_VALIDO,
+            "ENDERECO": "Rua Original, 1",
+            "GALERIA": [],
+        })
+
+    def _dados_edicao(self, **overrides):
+        dados = {
+            "ID_OBRA": "12026",
+            "TIPO_OBRA": "PAVIMENTAÇÃO",
+            "SITUACAO": "Em andamento",
+            "TIPO_EXECUCAO": "Nova Construção",
+            "VALOR_OBRA": "2.000,00",
+            "DATA_INICIO": "2026-01-01",
+            "CONCLUSAO_PREVISTA": "2026-12-31",
+            "DATA_FINALIZACAO": "",
+            "NOME_EMPRESA": "Empresa Editada",
+            "ENDERECO": "Rua Editada, 456",
+            "CNPJ_EMPRESA": CNPJ_VALIDO,
+            "form_token": _gerar_form_token(),
+        }
+        dados.update(overrides)
+        return dados
+
+    @patch("obras.views.cloudinary.uploader.upload")
+    def test_edicao_com_foto_jpeg_valida_salva_e_faz_upload(self, mock_upload):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        mock_upload.return_value = {"secure_url": "https://res.cloudinary.com/teste/nova.jpg"}
+        dados = self._dados_edicao()
+        arquivos = {"FOTO_OBRA": SimpleUploadedFile("nova.jpg", _JPEG_MINIMO, content_type="image/jpeg")}
+        self.client.post("/salvar-edicao-obra/", {**dados, **arquivos})
+        mock_upload.assert_called_once()
+        doc = self.colecao_obras.find_one({"ID_OBRA": "12026"})
+        self.assertEqual(doc["NOME_EMPRESA"], "Empresa Editada")
+
+    @patch("obras.views.cloudinary.uploader.upload")
+    def test_edicao_com_magic_bytes_invalidos_e_rejeitada(self, mock_upload):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        dados = self._dados_edicao()
+        arquivos = {"FOTO_OBRA": SimpleUploadedFile("falso.jpg", _CONTEUDO_INVALIDO, content_type="image/jpeg")}
+        self.client.post("/salvar-edicao-obra/", {**dados, **arquivos})
+        mock_upload.assert_not_called()
+        doc = self.colecao_obras.find_one({"ID_OBRA": "12026"})
+        # Obra não deve ter sido atualizada
+        self.assertEqual(doc["NOME_EMPRESA"], "Empresa Original")
+
+    @patch("obras.views.cloudinary.uploader.upload")
+    def test_edicao_com_mais_de_10_fotos_e_rejeitada(self, mock_upload):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        dados = self._dados_edicao()
+        fotos = [
+            SimpleUploadedFile(f"foto{i}.jpg", _JPEG_MINIMO, content_type="image/jpeg")
+            for i in range(11)
+        ]
+        self.client.post("/salvar-edicao-obra/", {**dados, "FOTO_OBRA": fotos})
+        mock_upload.assert_not_called()
+        doc = self.colecao_obras.find_one({"ID_OBRA": "12026"})
+        self.assertEqual(doc["NOME_EMPRESA"], "Empresa Original")
+
+
+# ==============================================================================
+# CONTROLE DE ACESSO — FUNCIONÁRIO COMUM EM ENDPOINTS DE SUPERVISOR
+# ==============================================================================
+
+class ControleAcessoComumTestCase(MongoTesteBase):
+    """Funcionário COMUM autenticado não pode acessar endpoints de supervisor."""
+
+    def setUp(self):
+        super().setUp()
+        self.comum = User.objects.create_user(
+            username=CPF_VALIDO, password=SENHA_FORTE, first_name="Comum Teste"
+        )
+        self.client.force_login(self.comum)
+        # Funcionário alvo para tentativa de edição
+        User.objects.create_user(username="00000000191", password=SENHA_FORTE, first_name="Alvo")
+        self.colecao_funcionarios.insert_one({
+            "CPF": "00000000191",
+            "NOME": "ALVO TESTE",
+            "DATA_NASCIMENTO": "20/05/1990",
+            "RG": "123456789",
+            "FUNCAO": "COMUM",
+        })
+        session = self.client.session
+        session["cpf_editando"] = "00000000191"
+        session.save()
+
+    def test_comum_nao_pode_acessar_salva_edicao_funcionario(self):
+        dados = {
+            "CPF_ORIGINAL": "00000000191",
+            "NOME": "Tentativa de Alteracao",
+            "DATA_NASCIMENTO": "1990-05-20",
+            "RG": "123456789",
+            "FUNCAO": "COMUM",
+            "SENHA": "",
+            "form_token": _gerar_form_token(),
+        }
+        resposta = self.client.post("/salvar-edicao-funcionario/", dados)
+        self.assertRedirects(resposta, "/inicio/")
+        doc = self.colecao_funcionarios.find_one({"CPF": "00000000191"})
+        self.assertEqual(doc["NOME"], "ALVO TESTE")
+
+    def test_comum_nao_pode_acessar_busca_atualiza_funcionario(self):
+        resposta = self.client.get("/atualizar-funcionario/")
+        self.assertRedirects(resposta, "/inicio/")
+
+
+# ==============================================================================
+# BUSCA DE OBRA — SESSÃO
+# ==============================================================================
+
+class BuscaObraSessionTestCase(MongoTesteBase):
+    """Verifica comportamentos de sessão na busca de obra."""
+
+    def setUp(self):
+        super().setUp()
+        self.user = User.objects.create_user(
+            username=CPF_VALIDO, password=SENHA_FORTE, first_name="Joao"
+        )
+        self.colecao_obras.insert_one({
+            "ID_OBRA": "12026",
+            "TIPO_OBRA": "PAVIMENTAÇÃO",
+            "SITUACAO": "Em andamento",
+            "VALOR_OBRA": "1.000,00",
+            "DATA_INICIO": "01/01/2026",
+            "CONCLUSAO_PREVISTA": "31/12/2026",
+            "DATA_FINALIZACAO": "—",
+            "NOME_EMPRESA": "Empresa Teste",
+            "CNPJ_EMPRESA": CNPJ_VALIDO,
+            "TIPO_EXECUCAO": "Nova Construção",
+            "ENDERECO": "Rua de Teste, 123",
+        })
+        self.client.force_login(self.user)
+
+    def test_busca_obra_id_vazio_exibe_erro(self):
+        resposta = self.client.post(
+            "/atualizar-obra/",
+            {"ID_OBRA": ""},
+            HTTP_HX_REQUEST="true",
+        )
         self.assertEqual(resposta.status_code, 200)
