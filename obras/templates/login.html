@@ -1,6 +1,30 @@
 {% extends 'base.html' %}
 {% load static %}
 
+{% block extra_css %}
+<style>
+  .aviso-next {
+    background-color: #fff3cd;
+    color: #856404;
+    border: 1px solid #ffeeba;
+    padding: 15px;
+    border-radius: 8px;
+    font-size: .9em;
+    margin-bottom: 25px;
+    text-align: center;
+    line-height: 1.5;
+  }
+  [data-theme="dark"] .aviso-next {
+    background-color: rgba(234, 179, 8, 0.12);
+    color: #fde68a;
+    border-color: rgba(234, 179, 8, 0.3);
+  }
+  [data-theme="dark"] .aviso-next strong {
+    color: #fef08a;
+  }
+</style>
+{% endblock %}
+
 {% block content %}
 
 {% if login_success %}
@@ -20,6 +44,9 @@
     </a>
   </div>
 </div>
+<script nonce="{{ request.csp_nonce }}">
+  history.replaceState(null, '', '/login/');
+</script>
 {% endif %}
 
 <div style="display:flex;justify-content:center;align-items:flex-start;min-height:100vh;padding-top:80px;">
@@ -28,11 +55,13 @@
     <h2 style="color:#333;margin-bottom:25px;font-weight:700;">Login Administrativo</h2>
 
     {% if request.GET.next %}
-      <div style="background-color:#fff3cd;color:#856404;padding:15px;border-radius:8px;font-size:.9em;margin-bottom:25px;border:1px solid #ffeeba;text-align:center;line-height:1.5;">
+      <div class="aviso-next">
         {% if "cadastro-funcionario" in request.GET.next %}
           Realize o login para acessar o <strong>Cadastro de Funcionários</strong>.
         {% elif "atualizar-funcionario" in request.GET.next %}
           Realize o login para <strong>Editar Funcionários</strong>.
+        {% elif "zona-exclusao" in request.GET.next %}
+          Realize o login para acessar a <strong>Zona de Exclusão</strong>.
         {% elif "obra" in request.GET.next %}
           Realize o login para acessar a área de <strong>Obras</strong>.
         {% else %}

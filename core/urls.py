@@ -1,6 +1,6 @@
 from django.contrib import admin
 from django.urls import path
-from obras.views import pagina_inicial, cadastro_obras, index, cadastro_funcionario, lista_obras,busca_atualiza_obra, busca_atualiza_funcionario, salva_edicao_obra, salva_edicao_funcionario, login_view, logout_view, galeria_obra
+from obras.views import pagina_inicial, cadastro_obras, index, cadastro_funcionario, lista_obras, busca_atualiza_obra, busca_atualiza_funcionario, salva_edicao_obra, salva_edicao_funcionario, login_view, logout_view, galeria_obra, zona_exclusao, deletar_obra
 from django.contrib.auth import views as auth_views
 
 urlpatterns = [
@@ -19,6 +19,6 @@ urlpatterns = [
     path('atualizar-funcionario/', busca_atualiza_funcionario, name='busca_atualiza_funcionario'),
     path('salvar-edicao-funcionario/', salva_edicao_funcionario, name='salva_edicao_funcionario'),
     path('galeria/<str:id_obra>/', galeria_obra, name='galeria_obra'),
-    
-    
+    path('zona-exclusao/', zona_exclusao, name='zona_exclusao'),
+    path('deletar-obra/', deletar_obra, name='deletar_obra'),
 ]

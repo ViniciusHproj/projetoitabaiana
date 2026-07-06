@@ -33,7 +33,9 @@ class CSPNonceMiddleware:
             "font-src 'self'; "
             "connect-src 'self'; "
             "frame-src https://datastudio.google.com https://lookerstudio.google.com; "
-            "object-src 'none';"
+            "object-src 'none'; "
+            "form-action 'self'; "
+            "base-uri 'self';"
         )
         response['Content-Security-Policy'] = csp
         return response
@@ -119,7 +121,7 @@ class SessaoUnicaMiddleware:
                 # aviso. HX-Redirect instrui o htmx a fazer uma navegação cheia
                 # do navegador em vez de tentar trocar só o fragmento.
                 if request.headers.get('HX-Request'):
-                    resposta = HttpResponse(status=200)
+                    resposta = HttpResponse(status=204)
                     resposta['HX-Redirect'] = reverse('login')
                     return resposta
 

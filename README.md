@@ -56,7 +56,7 @@ obras/
   views.py             # toda a lógica de negócio (cadastro, login, validações, etc.)
   middleware.py        # sessão expirada por inatividade + sessão única por usuário
   utils.py             # helpers de formatação de data compartilhados
-  tests.py             # suite de 181 testes automatizados
+  tests.py             # suite de 209 testes automatizados
   templates/           # templates HTML (HTMX), um por tela/fragmento
   static/              # CSS, JS e fontes (style_nav.css, style_obras.css, script_partials.js, htmx.min.js)
 manage.py
@@ -137,15 +137,17 @@ git push origin main
 
 ## Segurança implementada
 
-- **Rate-limit de login** persistido no MongoDB (sobrevive a reinícios/deploys do Render) — bloqueio temporário por IP e por CPF após tentativas seguidas erradas, com janela deslizante de 15 minutos. O IP do cliente é lido a partir do **último** valor de `X-Forwarded-For` (o escrito pelo proxy confiável do Render), nunca o primeiro — o primeiro vem do próprio cliente e poderia ser forjado para burlar o bloqueio por IP.
+- **Rate-limit de login atômico** persistido no MongoDB (sobrevive a reinícios/deploys do Render) — bloqueio temporário por IP e por CPF após tentativas seguidas erradas, com janela deslizante de 15 minutos. Incremento de contador usa `$inc` atômico via `find_one_and_update`, eliminando race condition de POSTs simultâneos. O IP é lido do **último** valor de `X-Forwarded-For` (escrito pelo proxy do Render), nunca do primeiro (que vem do cliente e pode ser forjado).
 - **Sessão única por usuário** — um novo login em outro dispositivo encerra a sessão anterior automaticamente, com feedback via `HX-Redirect` para preservar o layout HTMX.
-- **Content-Security-Policy** (CSP) com `nonce` por request — impede execução de qualquer script sem nonce válido, bloqueando XSS mesmo que algum dado fosse injetado na página. Gerado por middleware em `obras/middleware.py`.
+- **Redirect de usuário autenticado em `/login/`** — GET e POST para `/login/` redirecionam para `/inicio/` se o usuário já está autenticado, impedindo re-login na mesma janela.
+- **Content-Security-Policy** (CSP) com `nonce` por request — inclui `form-action 'self'` e `base-uri 'self'` além de `script-src` com nonce. Impede execução de scripts sem nonce, redirecionamento de formulários para domínios externos e injeção de `<base>`. Gerado por middleware em `obras/middleware.py`.
 - **Fontes locais** — `DM Sans` servida pelo próprio servidor via WhiteNoise (sem dependência de CDN externo); elimina rastreamento do Google Fonts e falha de fontes por indisponibilidade de CDN.
 - **`ALLOWED_HOSTS` seguro** — configuração via env var; valor vazio ou ausente resulta em lista vazia (não em `['']` que aceitaria qualquer host) graças a filtro explícito de strings vazias.
 - **Validação de CPF e CNPJ** com cálculo real de dígito verificador (não só formato).
 - **Validação de força de senha** (`AUTH_PASSWORD_VALIDATORS`) aplicada explicitamente no cadastro e na troca de senha de funcionários — Django não faz isso automaticamente fora dos formulários prontos dele.
-- **Proteção contra duplo-submit** em todos os formulários de cadastro/edição: trava temporária de debounce (4s funcionário / 12s obra) + token UUID de uso único por renderização.
-- **Token de idempotência** (campo oculto `form_token`) em todos os forms de criação/edição — POST sem token é rejeitado (fail-secure).
+- **Proteção contra duplo-submit** em todos os formulários de cadastro/edição: trava temporária de debounce (4s funcionário / 12s obra) + token UUID de uso único por renderização via `cache.add()` atômico.
+- **Token de idempotência** (campo oculto `form_token`) em todos os forms de criação/edição/deleção — POST sem token é rejeitado (fail-secure). Verificação atômica com `cache.add()` elimina race condition de dois POSTs simultâneos.
+- **Audit log de deleção** — cada exclusão de obra registra `logger.warning` com ID da obra, usuário e IP para rastreabilidade.
 - **CSRF** em todos os formulários POST (incluindo logout).
 - **Logout POST-only** — previne CSRF-logout via `<img src="/logout/">` de outro site.
 - **Proteção contra open-redirect** em `?next=` no login, validado com `url_has_allowed_host_and_scheme()`.
@@ -164,7 +166,7 @@ python manage.py test obras --keepdb
 
 > **`--keepdb` é obrigatório** após o primeiro setup — sem ele o Django recria o banco de teste do zero e falha com erro de coleção duplicada no MongoDB.
 
-A suite (181 testes) cobre: validadores de CPF/CNPJ/RG/datas/valor, a correção de segurança do IP via `X-Forwarded-For`, rate-limit de login, sessão única por usuário, fluxos completos de cadastro/edição de obras e funcionários (incluindo idempotência por `form_token`, validação de magic bytes de upload, e proteção contra duplo-submit), controle de acesso, login com modal de sucesso, e pages públicas.
+A suite (209 testes) cobre: validadores de CPF/CNPJ/RG/datas/valor, a correção de segurança do IP via `X-Forwarded-For`, rate-limit de login, sessão única por usuário, fluxos completos de cadastro/edição de obras e funcionários (incluindo idempotência por `form_token`, validação de magic bytes de upload, e proteção contra duplo-submit), controle de acesso, login com modal de sucesso, redirect de usuário autenticado em `/login/`, audit log e token de deleção de obra, e pages públicas.
 
 Requer conectividade real com o MongoDB do `.env` — os testes usam um banco separado no mesmo cluster (`{MONGODB_DB_NAME}_teste`), criado na primeira execução e preservado via `--keepdb`; nada é gravado no banco de produção. Upload de fotos (Cloudinary) é mockado, então não precisa de credenciais reais do Cloudinary para rodar.
 

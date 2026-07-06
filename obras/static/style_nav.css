@@ -295,6 +295,24 @@ body {
     color: var(--sidebar-text);
 }
 
+/* Zona de Exclusão — sidebar danger styles */
+.sidebar-link-icon-danger svg {
+    stroke: rgba(248,113,113,0.8);
+}
+.sidebar-link-text-danger {
+    color: rgba(248,113,113,0.85);
+}
+.sidebar-group-danger:hover .sidebar-link-text-danger,
+.sidebar-group-danger:hover .sidebar-link-icon-danger svg {
+    color: #f87171;
+    stroke: #f87171;
+}
+.sidebar-submenu .sidebar-link:hover .sidebar-link-text-danger,
+.sidebar-submenu .sidebar-link:hover .sidebar-link-icon-danger svg {
+    color: #f87171;
+    stroke: #f87171;
+}
+
 /* Logout button in sidebar */
 .sidebar-logout {
     display: flex;

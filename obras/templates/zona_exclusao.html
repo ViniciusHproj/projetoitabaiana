@@ -1,0 +1,382 @@
+{% include 'partial_messages.html' %}
+
+<div class="wrap" data-pagina-scroll>
+  <div class="card">
+    <div class="header">
+      <div class="header-icon" style="background: rgba(220,38,38,0.12);">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#dc2626" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+        </svg>
+      </div>
+      <div>
+        <div class="header-title" style="color: #dc2626;">Zona de Exclusão</div>
+        <div class="header-sub">Exclusão permanente de obras — ação irreversível</div>
+      </div>
+    </div>
+    <div class="divider" style="margin-top: 0;"></div>
+
+    {% if obras %}
+    <div class="exclusao-aviso">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0; margin-top:1px;">
+        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+      </svg>
+      Ao excluir uma obra, as fotos são removidas do servidor, a entrada na planilha é apagada e o registro não pode ser recuperado.
+    </div>
+
+    <div class="exclusao-lista">
+      {% for obra in obras %}
+      <div class="exclusao-item" id="obra-item-{{ obra.ID_OBRA }}">
+
+        <span class="exclusao-id">{{ obra.ID_OBRA }}</span>
+        <span class="exclusao-tipo exclusao-marquee">{{ obra.TIPO_OBRA|default:"—" }}</span>
+        <span class="exclusao-end exclusao-marquee">{{ obra.ENDERECO|default:"Endereço não informado" }}</span>
+        <span class="exclusao-situacao situacao-{{ obra.SITUACAO|lower|slugify }}">{{ obra.SITUACAO|default:"—" }}</span>
+        <span class="exclusao-data">{{ obra.DATA_CADASTRO|default:"—" }}</span>
+
+        <button type="button" class="btn-excluir"
+                data-id="{{ obra.ID_OBRA }}"
+                data-tipo="{{ obra.TIPO_OBRA|default:'—' }}">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/>
+          </svg>
+          Excluir
+        </button>
+
+      </div>
+      {% endfor %}
+    </div>
+
+    {% if total_paginas > 1 %}
+    <div class="exclusao-paginacao">
+      {% if pagina > 1 %}
+      <a class="pag-btn"
+         hx-get="{% url 'zona_exclusao' %}?pagina={{ pagina|add:'-1' }}"
+         hx-target="#conteudo-dinamico"
+         hx-push-url="true"
+         href="{% url 'zona_exclusao' %}?pagina={{ pagina|add:'-1' }}">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+        Anterior
+      </a>
+      {% else %}
+      <span class="pag-btn pag-btn--disabled">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+        Anterior
+      </span>
+      {% endif %}
+
+      <span class="pag-info">Página {{ pagina }} de {{ total_paginas }}</span>
+
+      {% if pagina < total_paginas %}
+      <a class="pag-btn"
+         hx-get="{% url 'zona_exclusao' %}?pagina={{ pagina|add:'1' }}"
+         hx-target="#conteudo-dinamico"
+         hx-push-url="true"
+         href="{% url 'zona_exclusao' %}?pagina={{ pagina|add:'1' }}">
+        Próxima
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+      </a>
+      {% else %}
+      <span class="pag-btn pag-btn--disabled">
+        Próxima
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+      </span>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    {% else %}
+    <div class="exclusao-vazio">
+      <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.3;">
+        <rect x="2" y="10" width="20" height="10" rx="2"/><rect x="6" y="6" width="12" height="5" rx="1"/><rect x="10" y="3" width="4" height="4" rx="1"/>
+      </svg>
+      <p>Nenhuma obra cadastrada no sistema.</p>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+<!-- ── Modal de confirmação de exclusão ── -->
+<div id="modal-exclusao" style="display:none; position:fixed; inset:0; z-index:9999; align-items:center; justify-content:center;">
+  <div style="position:absolute; inset:0; background:rgba(0,0,0,0.45); backdrop-filter:blur(2px);" id="modal-exclusao-backdrop"></div>
+  <div style="
+    position:relative; z-index:1;
+    background:var(--dropdown-bg, #fff);
+    border:1px solid var(--dropdown-divider, #eaf0f8);
+    border-radius:12px;
+    box-shadow:0 8px 32px rgba(0,0,0,0.22);
+    padding:32px 28px 24px;
+    max-width:420px; width:calc(100% - 32px);
+    text-align:center;
+  ">
+    <!-- Ícone -->
+    <div style="
+      width:52px; height:52px; border-radius:50%;
+      background:rgba(220,38,38,0.1);
+      display:flex; align-items:center; justify-content:center;
+      margin:0 auto 16px;
+    ">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#dc2626" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+      </svg>
+    </div>
+
+    <div style="font-size:1.05rem; font-weight:700; color:var(--dropdown-text, #1a1a1a); margin-bottom:6px;">
+      Excluir obra <span id="modal-exclusao-id" style="color:#dc2626;"></span>?
+    </div>
+    <div id="modal-exclusao-tipo" style="font-size:0.82rem; font-weight:600; text-transform:uppercase; letter-spacing:0.04em; color:var(--welcome-text, #6b7280); margin-bottom:14px;"></div>
+    <div style="font-size:0.875rem; color:var(--welcome-text, #6b8aaa); line-height:1.55; margin-bottom:24px;">
+      As fotos serão removidas do servidor e a entrada na planilha será apagada.<br>
+      <strong style="color:var(--dropdown-text,#1a1a1a);">Esta ação não pode ser desfeita.</strong>
+    </div>
+
+    <div style="display:flex; gap:12px; justify-content:center;">
+      <button type="button" id="modal-exclusao-cancelar" style="
+        flex:1; padding:10px 0; border-radius:8px; font-size:0.9rem; font-weight:600; cursor:pointer;
+        border:1px solid var(--dropdown-divider, #ddd);
+        background:transparent; color:var(--dropdown-text, #2c4a6e);
+        font-family:inherit;
+        transition:background .15s;
+      ">Cancelar</button>
+
+      <form id="form-confirmar-exclusao" method="post" action="{% url 'deletar_obra' %}"
+            hx-post="{% url 'deletar_obra' %}"
+            hx-target="#conteudo-dinamico"
+            hx-swap="innerHTML"
+            hx-indicator="#btn-confirmar-exclusao"
+            style="flex:1;">
+        {% csrf_token %}
+        <input type="hidden" name="id_obra" id="modal-exclusao-input-id" value="">
+        <input type="hidden" name="form_token" value="{{ form_token }}">
+        <button type="submit" id="btn-confirmar-exclusao" style="
+          width:100%; padding:10px 0; border-radius:8px; font-size:0.9rem; font-weight:600; cursor:pointer;
+          border:none; background:#dc2626; color:#fff;
+          font-family:inherit;
+          display:flex; align-items:center; justify-content:center; gap:8px;
+          transition:background .15s, opacity .15s;
+        ">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+          </svg>
+          Confirmar exclusão
+          <div class="spinner-loading" style="border-color:rgba(255,255,255,0.3); border-top-color:#fff;"></div>
+        </button>
+      </form>
+    </div>
+  </div>
+</div>
+
+<style>
+  .exclusao-aviso {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    background: rgba(220,38,38,0.07);
+    border: 1px solid rgba(220,38,38,0.2);
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 12.5px;
+    color: #b91c1c;
+    margin-bottom: 18px;
+    line-height: 1.5;
+  }
+  [data-theme="dark"] .exclusao-aviso {
+    background: rgba(220,38,38,0.1);
+    border-color: rgba(220,38,38,0.25);
+    color: #fca5a5;
+  }
+
+  .exclusao-lista { display: flex; flex-direction: column; gap: 6px; }
+
+  .exclusao-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    height: 52px;
+    padding: 0 16px;
+    background: var(--bg-card, #fff);
+    border: 1px solid var(--border, #e5e7eb);
+    border-radius: 10px;
+    overflow: hidden;
+    transition: border-color 0.15s;
+  }
+  .exclusao-item:hover { border-color: rgba(220,38,38,0.35); }
+  [data-theme="dark"] .exclusao-item { background: rgba(255,255,255,0.03); border-color: rgba(255,255,255,0.08); }
+  [data-theme="dark"] .exclusao-item:hover { border-color: rgba(220,38,38,0.4); }
+
+  .exclusao-id {
+    flex-shrink: 0;
+    font-size: 13px; font-weight: 700;
+    color: var(--text-primary, #111827);
+    background: var(--bg-soft, #f3f4f6);
+    padding: 2px 8px; border-radius: 5px;
+    white-space: nowrap;
+  }
+  [data-theme="dark"] .exclusao-id { color: #fff; background: rgba(255,255,255,0.08); }
+
+  .exclusao-tipo {
+    flex: 0 1 90px; min-width: 0;
+    font-size: 11.5px; font-weight: 600;
+    color: var(--text-secondary, #6b7280);
+    text-transform: uppercase; letter-spacing: 0.03em;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    cursor: default;
+  }
+  [data-theme="dark"] .exclusao-tipo { color: #9ca3af; }
+
+  .exclusao-end {
+    flex: 1 1 0; min-width: 0;
+    font-size: 12.5px;
+    color: var(--text-secondary, #6b7280);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    cursor: default;
+  }
+  [data-theme="dark"] .exclusao-end { color: #9ca3af; }
+
+  .exclusao-situacao {
+    flex-shrink: 0;
+    font-size: 11px; font-weight: 600;
+    padding: 2px 9px; border-radius: 20px;
+    white-space: nowrap;
+    background: rgba(107,114,128,0.12); color: #6b7280;
+  }
+  .exclusao-situacao.situacao-em-andamento { background: rgba(16,185,129,0.1); color: #059669; }
+  .exclusao-situacao.situacao-concluida,
+  .exclusao-situacao.situacao-finalizada-por-conclusao-de-construcao { background: rgba(59,130,246,0.1); color: #2563eb; }
+  .exclusao-situacao.situacao-em-licitacao { background: rgba(245,158,11,0.1); color: #d97706; }
+  .exclusao-situacao.situacao-paralisada   { background: rgba(239,68,68,0.1);  color: #dc2626; }
+  [data-theme="dark"] .exclusao-situacao { color: #9ca3af; background: rgba(156,163,175,0.1); }
+  [data-theme="dark"] .exclusao-situacao.situacao-em-andamento { color: #6ee7b7; background: rgba(16,185,129,0.15); }
+  [data-theme="dark"] .exclusao-situacao.situacao-concluida,
+  [data-theme="dark"] .exclusao-situacao.situacao-finalizada-por-conclusao-de-construcao { color: #93c5fd; background: rgba(59,130,246,0.15); }
+  [data-theme="dark"] .exclusao-situacao.situacao-em-licitacao { color: #fcd34d; background: rgba(245,158,11,0.15); }
+  [data-theme="dark"] .exclusao-situacao.situacao-paralisada   { color: #fca5a5; background: rgba(239,68,68,0.15); }
+
+  .exclusao-data {
+    flex-shrink: 0;
+    font-size: 11.5px; color: var(--text-secondary, #9ca3af); white-space: nowrap;
+  }
+  [data-theme="dark"] .exclusao-data { color: #6b7280; }
+
+  .btn-excluir {
+    flex-shrink: 0;
+    display: flex; align-items: center; gap: 6px;
+    background: #dc2626; color: #fff;
+    border: none; border-radius: 7px;
+    padding: 6px 13px;
+    font-size: 12.5px; font-weight: 600;
+    cursor: pointer; white-space: nowrap; font-family: inherit;
+    transition: background 0.15s;
+  }
+  .btn-excluir:hover { background: #b91c1c; }
+
+  .exclusao-vazio {
+    display: flex; flex-direction: column; align-items: center;
+    gap: 12px; padding: 48px 24px;
+    color: var(--text-secondary, #9ca3af); font-size: 14px;
+  }
+
+  .exclusao-paginacao {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    margin-top: 18px;
+    padding-top: 14px;
+    border-top: 1px solid var(--border, #e5e7eb);
+  }
+  [data-theme="dark"] .exclusao-paginacao { border-top-color: rgba(255,255,255,0.07); }
+
+  .pag-btn {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 6px 14px;
+    border-radius: 7px;
+    font-size: 12.5px; font-weight: 600;
+    background: var(--bg-soft, #f3f4f6);
+    color: var(--text-primary, #111827);
+    border: 1px solid var(--border, #e5e7eb);
+    text-decoration: none;
+    cursor: pointer;
+    transition: background .15s, border-color .15s;
+  }
+  .pag-btn:hover { background: var(--border, #e5e7eb); border-color: #d1d5db; }
+  [data-theme="dark"] .pag-btn { background: rgba(255,255,255,0.06); color: #fff; border-color: rgba(255,255,255,0.1); }
+  [data-theme="dark"] .pag-btn:hover { background: rgba(255,255,255,0.1); }
+
+  .pag-btn--disabled {
+    opacity: 0.4; cursor: default; pointer-events: none;
+  }
+
+  .pag-info {
+    font-size: 12px;
+    color: var(--text-secondary, #6b7280);
+    white-space: nowrap;
+  }
+  [data-theme="dark"] .pag-info { color: #9ca3af; }
+
+  /* Spinner no botão de confirmar do modal */
+  #btn-confirmar-exclusao .spinner-loading { display: none; width: 14px; height: 14px; }
+  #btn-confirmar-exclusao.htmx-request .spinner-loading { display: block; }
+  #btn-confirmar-exclusao.htmx-request { opacity: 0.7; pointer-events: none; }
+
+  @keyframes exclusao-marquee {
+    0%   { transform: translateX(0); }
+    20%  { transform: translateX(0); }
+    80%  { transform: translateX(var(--mq-end, 0px)); }
+    100% { transform: translateX(var(--mq-end, 0px)); }
+  }
+</style>
+
+<script nonce="{{ request.csp_nonce }}">
+(function () {
+  var modal = document.getElementById('modal-exclusao');
+  var inputId = document.getElementById('modal-exclusao-input-id');
+  var spanId  = document.getElementById('modal-exclusao-id');
+  var spanTipo = document.getElementById('modal-exclusao-tipo');
+
+  document.querySelectorAll('.btn-excluir').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var id   = btn.dataset.id;
+      var tipo = btn.dataset.tipo;
+      inputId.value = id;
+      spanId.textContent  = id;
+      spanTipo.textContent = tipo !== '—' ? tipo : '';
+      modal.style.display = 'flex';
+    });
+  });
+
+  function fecharModal() {
+    modal.style.display = 'none';
+    inputId.value = '';
+  }
+
+  document.getElementById('modal-exclusao-cancelar').addEventListener('click', fecharModal);
+  document.getElementById('modal-exclusao-backdrop').addEventListener('click', fecharModal);
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && modal.style.display === 'flex') fecharModal();
+  });
+
+  // Marquee nos campos da lista
+  document.querySelectorAll('.exclusao-marquee').forEach(function (el) {
+    el.addEventListener('mouseenter', function () {
+      if (el.scrollWidth <= el.clientWidth) return;
+      var overflow = el.scrollWidth - el.clientWidth;
+      var span = document.createElement('span');
+      span.textContent = el.textContent;
+      el.textContent = '';
+      el.appendChild(span);
+      el.style.textOverflow = 'clip';
+      span.style.display = 'inline-block';
+      el.style.setProperty('--mq-end', '-' + overflow + 'px');
+      span.style.animation = 'exclusao-marquee 3s linear infinite';
+    });
+    el.addEventListener('mouseleave', function () {
+      var span = el.querySelector('span');
+      if (!span) return;
+      el.textContent = span.textContent;
+      el.style.textOverflow = '';
+      el.style.removeProperty('--mq-end');
+    });
+  });
+})();
+</script>

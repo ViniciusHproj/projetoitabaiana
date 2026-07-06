@@ -242,27 +242,23 @@ def _tentativas_restantes(chave_ip, chave_cpf):
     return max(0, LOGIN_MAX_TENTATIVAS - usadas)
 
 
+def _incrementar_contador_login(chave, expira_em, agora):
+    """Incrementa atomicamente o contador de tentativas e retorna a nova contagem."""
+    resultado = colecao_seguranca_login.find_one_and_update(
+        {'_id': chave},
+        {'$inc': {'contagem': 1}, '$set': {'expira_em': expira_em, 'atualizado_em': agora}},
+        upsert=True,
+        return_document=True,
+    )
+    return resultado.get('contagem', 1) if resultado else 1
+
+
 def _registrar_tentativa_falha_login(request, chave_ip, chave_cpf, cpf_tentado):
     agora = datetime.utcnow()
     expira_em = agora + timedelta(seconds=LOGIN_JANELA_BLOQUEIO_SEGUNDOS)
 
-    contagem_ip, _ = _ler_contador_login(chave_ip)
-    nova_contagem_ip = contagem_ip + 1
-    colecao_seguranca_login.update_one(
-        {'_id': chave_ip},
-        {'$set': {'contagem': nova_contagem_ip, 'expira_em': expira_em, 'atualizado_em': agora}},
-        upsert=True,
-    )
-
-    nova_contagem_cpf = 0
-    if chave_cpf:
-        contagem_cpf, _ = _ler_contador_login(chave_cpf)
-        nova_contagem_cpf = contagem_cpf + 1
-        colecao_seguranca_login.update_one(
-            {'_id': chave_cpf},
-            {'$set': {'contagem': nova_contagem_cpf, 'expira_em': expira_em, 'atualizado_em': agora}},
-            upsert=True,
-        )
+    nova_contagem_ip = _incrementar_contador_login(chave_ip, expira_em, agora)
+    nova_contagem_cpf = _incrementar_contador_login(chave_cpf, expira_em, agora) if chave_cpf else 0
 
     if max(nova_contagem_ip, nova_contagem_cpf) >= LOGIN_MAX_TENTATIVAS:
         logger.warning(
@@ -281,15 +277,18 @@ def _registrar_bloqueio_repetido(cpf_tentado):
     agora = datetime.utcnow()
     expira_em = agora + timedelta(hours=24)
 
+    # Reset o contador se o documento expirou antes de incrementar.
     doc = colecao_seguranca_login.find_one({'_id': chave_alerta})
-    contagem_atual = doc.get('contagem', 0) if doc and doc['expira_em'] > agora else 0
-    nova_contagem = contagem_atual + 1
+    if doc and doc.get('expira_em', agora) <= agora:
+        colecao_seguranca_login.delete_one({'_id': chave_alerta})
 
-    colecao_seguranca_login.update_one(
+    resultado_alerta = colecao_seguranca_login.find_one_and_update(
         {'_id': chave_alerta},
-        {'$set': {'contagem': nova_contagem, 'expira_em': expira_em, 'atualizado_em': agora}},
+        {'$inc': {'contagem': 1}, '$set': {'expira_em': expira_em, 'atualizado_em': agora}},
         upsert=True,
+        return_document=True,
     )
+    nova_contagem = resultado_alerta.get('contagem', 1) if resultado_alerta else 1
 
     if nova_contagem >= LOGIN_BLOQUEIOS_PARA_ALERTA:
         logger.warning(
@@ -336,10 +335,9 @@ def _token_ja_usado(token):
     if not token:
         return True  # POST sem token = envio inválido/forjado, rejeita
     chave = f'form_token_{token}'
-    if cache.get(chave):
-        return True
-    cache.set(chave, True, 300)  # 5 minutos é mais que suficiente para qualquer reenvio
-    return False
+    # cache.add é atômico: retorna False se a chave já existe, True se inseriu.
+    # Evita race condition de dois POSTs simultâneos passando pelo get+set separado.
+    return not cache.add(chave, True, 300)
 
 def _metricas_obras():
     try:
@@ -483,6 +481,8 @@ def login_view(request):
     # se checássemos isso também no POST, a mensagem seria recriada a cada
     # tentativa de login e duplicaria com a de sucesso/erro do POST.
     if request.method == 'GET':
+        if request.user.is_authenticated:
+            return redirect('inicio')
         aviso = request.GET.get('aviso', '')
         if aviso == 'inatividade':
             messages.warning(request, "Sua sessão foi encerrada automaticamente por inatividade. Faça login novamente.")
@@ -493,6 +493,8 @@ def login_view(request):
         return render(request, 'login.html')
 
     if request.method == 'POST':
+        if request.user.is_authenticated:
+            return redirect('inicio')
         usuario_cpf = request.POST.get('username', '').replace('.', '').replace('-', '')
         senha_digitada = request.POST.get('password', '')
 
@@ -543,7 +545,7 @@ def login_view(request):
                 proxima_url = reverse('inicio')
 
             # Renderiza a própria página de login com o modal de sucesso visível.
-            # O botão "OK" do modal é um <a href> que redireciona para proxima_url
+            # O botão "Continuar" do modal é um <a href> que redireciona para proxima_url
             # sem JavaScript inline — o usuário confirma antes de seguir.
             return render(request, 'login.html', {
                 'login_success': True,
@@ -595,14 +597,21 @@ def eh_supervisor(user):
     return user.is_authenticated and (user.is_staff or user.is_superuser)
 
 def pegar_ano_google():
+    # Resultado cacheado por 1h — evita bloquear o thread do request numa chamada UDP
+    # ao servidor NTP a cada cadastro de obra. O ano muda uma vez por ano; 1h é mais
+    # que suficiente para capturar a virada sem nunca atrasar uma resposta HTTP.
+    _CACHE_KEY_ANO = 'ano_ntp'
+    ano = cache.get(_CACHE_KEY_ANO)
+    if ano is not None:
+        return ano
     try:
-        # Tenta pegar a hora real de um servidor de tempo (NTP)
         cliente_ntp = ntplib.NTPClient()
         resposta = cliente_ntp.request('pool.ntp.org', version=3)
-        return datetime.fromtimestamp(resposta.tx_time).year
+        ano = datetime.fromtimestamp(resposta.tx_time).year
     except Exception:
-        # Se a internet falhar, usamos o ano do sistema como plano B
-        return datetime.now().year
+        ano = datetime.now().year
+    cache.set(_CACHE_KEY_ANO, ano, 3600)
+    return ano
     
 def cadastro_funcionario(request):
     # 1. Bloqueio para quem nem logou ainda
@@ -1163,11 +1172,20 @@ def cadastro_obras(request):
             # 4. UPLOAD MÚLTIPLO (Cloudinary)
             colecao = colecao_obras
             urls_galeria = []
+            public_ids_enviados = []
             try:
                 for foto in fotos_arquivos:
                     resultado_upload = cloudinary.uploader.upload(foto, folder="obras_projeto")
+                    public_ids_enviados.append(resultado_upload.get('public_id', ''))
                     urls_galeria.append(resultado_upload.get('secure_url'))
             except Exception:
+                # Limpa uploads já realizados antes de abortar — evita órfãos no Cloudinary.
+                for pid in public_ids_enviados:
+                    if pid:
+                        try:
+                            cloudinary.uploader.destroy(pid)
+                        except Exception:
+                            pass
                 return _render_cadastro("Erro ao enviar as imagens para o servidor.", nivel='error')
 
             url_da_foto_capa = urls_galeria[0] if urls_galeria else ""
@@ -1271,7 +1289,13 @@ def busca_atualiza_obra(request):
 
     if request.method == 'POST':
         id_obra_pesquisado = request.POST.get('ID_OBRA', '').strip()
-        
+
+        if not id_obra_pesquisado:
+            messages.error(request, "Informe um ID de obra para buscar.")
+            if request.headers.get('HX-Request'):
+                return render(request, 'busca_atualiza_obra.html')
+            return render(request, 'index.html', {'template_meio': 'busca_atualiza_obra.html'})
+
         # Procura a obra específica no banco
         obra_encontrada = colecao_obras.find_one({'ID_OBRA': id_obra_pesquisado})
 
@@ -1422,12 +1446,14 @@ def salva_edicao_obra(request):
             # ==========================================
             urls_novas = []
             if fotos_novas_arquivos:
+                public_ids_novos = []
                 try:
                     for foto in fotos_novas_arquivos:
                         resultado_upload = cloudinary.uploader.upload(foto, folder="obras_projeto")
                         url_url = resultado_upload.get('secure_url')
                         if not url_url:
                             raise ValueError("Cloudinary não retornou 'secure_url' para o upload.")
+                        public_ids_novos.append(resultado_upload.get('public_id', ''))
                         urls_novas.append(url_url)
 
                     # Só atualiza capa e timelapse depois que TODOS os uploads terminaram com sucesso.
@@ -1447,6 +1473,13 @@ def salva_edicao_obra(request):
 
                 except Exception:
                     logger.exception("Erro ao processar imagens da obra")
+                    # Limpa uploads já realizados antes de abortar — evita órfãos no Cloudinary.
+                    for pid in public_ids_novos:
+                        if pid:
+                            try:
+                                cloudinary.uploader.destroy(pid)
+                            except Exception:
+                                pass
                     erro_foto = True
                     # Garante que nenhuma URL parcial chegue ao update do Mongo.
                     urls_novas = []
@@ -1533,8 +1566,14 @@ def lista_obras(request):
         total_paginas = max(1, -(-total_obras // TAMANHO_PAGINA))
         pagina_num = max(1, min(pagina_num, total_paginas))
 
+        _CAMPOS_LISTA_OBRAS = {
+            'ID_OBRA': 1, 'TIPO_OBRA': 1, 'VALOR_OBRA': 1, 'SITUACAO': 1,
+            'EMPRESA_CONTRATADA': 1, 'TIPO_EXECUCAO': 1, 'ENDERECO': 1,
+            'DATA_INICIO': 1, 'CONCLUSAO_PREVISTA': 1, 'DATA_FINALIZACAO': 1,
+            'URL_FOTO': 1, '_id': 0,
+        }
         obras = list(
-            colecao_obras.find()
+            colecao_obras.find({}, _CAMPOS_LISTA_OBRAS)
             .sort('TIMESTAMP_CADASTRO', -1)
             .skip((pagina_num - 1) * TAMANHO_PAGINA)
             .limit(TAMANHO_PAGINA)
@@ -1673,3 +1712,133 @@ def atualizar_no_google_sheets(dados):
     intervalo = f'A{numero_da_linha}:J{numero_da_linha}'
     planilha.update(values=[linha_atualizada], range_name=intervalo)
     return True
+
+
+def deletar_do_google_sheets(id_obra):
+    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+    creds = GoogleServiceAccountCredentials.from_service_account_file(GOOGLE_SHEETS_CREDENTIALS_FILE, scopes=scope)
+    client = gspread.authorize(creds)
+    planilha = client.open(GOOGLE_SHEETS_SPREADSHEET_NAME).sheet1
+    celula = planilha.find(str(id_obra), in_column=1)
+    if not celula:
+        logger.warning("Obra ID %s não encontrada na planilha ao tentar excluir.", id_obra)
+        return
+    planilha.delete_rows(celula.row)
+
+
+def _extrair_public_id_cloudinary(url):
+    """Extrai o public_id de uma URL Cloudinary para permitir exclusão."""
+    try:
+        partes = url.split('/upload/')
+        if len(partes) < 2:
+            return None
+        caminho = partes[1]
+        # Remove o prefixo de versão (v{digits}/)
+        if caminho.startswith('v') and '/' in caminho:
+            _, caminho = caminho.split('/', 1)
+        # Remove a extensão
+        caminho = caminho.rsplit('.', 1)[0]
+        return caminho
+    except Exception:
+        return None
+
+
+_OBRAS_POR_PAGINA_EXCLUSAO = 6
+
+
+def zona_exclusao(request):
+    if not request.user.is_authenticated:
+        return redirect(f'/login/?next={request.path}')
+    if not (request.user.is_staff or request.user.is_superuser):
+        messages.error(request, "Acesso restrito a supervisores.")
+        return redirect('inicio')
+
+    try:
+        pagina = max(1, int(request.GET.get('pagina', 1)))
+    except (ValueError, TypeError):
+        pagina = 1
+
+    total = colecao_obras.count_documents({})
+    total_paginas = max(1, (total + _OBRAS_POR_PAGINA_EXCLUSAO - 1) // _OBRAS_POR_PAGINA_EXCLUSAO)
+    pagina = min(pagina, total_paginas)
+    skip = (pagina - 1) * _OBRAS_POR_PAGINA_EXCLUSAO
+
+    obras = list(colecao_obras.find(
+        {},
+        {'ID_OBRA': 1, 'TIPO_OBRA': 1, 'SITUACAO': 1, 'ENDERECO': 1, 'DATA_CADASTRO': 1, 'GALERIA': 1, '_id': 0}
+    ).sort('TIMESTAMP_CADASTRO', -1).skip(skip).limit(_OBRAS_POR_PAGINA_EXCLUSAO))
+
+    ctx = {
+        'obras': obras,
+        'pagina': pagina,
+        'total_paginas': total_paginas,
+        'total': total,
+        'form_token': _gerar_form_token(),
+    }
+
+    if request.headers.get('HX-Request'):
+        return render(request, 'zona_exclusao.html', ctx)
+    return render(request, 'index.html', {'template_meio': 'zona_exclusao.html', **ctx})
+
+
+def deletar_obra(request):
+    if not request.user.is_authenticated:
+        return redirect(f'/login/?next={request.path}')
+    if not (request.user.is_staff or request.user.is_superuser):
+        messages.error(request, "Acesso restrito a supervisores.")
+        return redirect('inicio')
+    if request.method != 'POST':
+        from django.http import HttpResponseNotAllowed
+        return HttpResponseNotAllowed(['POST'])
+
+    # Guard de token de idempotência — evita duplo-submit do modal de confirmação
+    form_token = request.POST.get('form_token', '').strip()
+    if _token_ja_usado(form_token):
+        messages.error(request, "Ação já processada ou token inválido.")
+        return redirect('zona_exclusao')
+
+    id_obra = request.POST.get('id_obra', '').strip()
+    if not id_obra:
+        messages.error(request, "ID de obra inválido.")
+        return redirect('zona_exclusao')
+
+    obra = colecao_obras.find_one({'ID_OBRA': id_obra})
+    if not obra:
+        messages.error(request, f"Obra {id_obra} não encontrada.")
+        return redirect('zona_exclusao')
+
+    # 1. Deletar fotos do Cloudinary (melhor esforço — falha não impede exclusão)
+    galeria = obra.get('GALERIA') or []
+    for url in galeria:
+        public_id = _extrair_public_id_cloudinary(url)
+        if public_id:
+            try:
+                cloudinary.uploader.destroy(public_id)
+            except Exception:
+                logger.warning("Não foi possível deletar imagem Cloudinary: %s", public_id)
+
+    # 2. Deletar entradas de timelapse
+    try:
+        colecao_timelapse.delete_many({'ID_OBRA': id_obra})
+    except Exception:
+        logger.exception("Erro ao deletar timelapse da obra %s", id_obra)
+
+    # 3. Deletar da planilha em background
+    _disparar_em_background(deletar_do_google_sheets, id_obra)
+
+    # 4. Deletar a obra do MongoDB
+    colecao_obras.delete_one({'ID_OBRA': id_obra})
+    _bump_cache_obras()
+
+    logger.warning(
+        "Obra %s excluída por %s (IP: %s)",
+        id_obra, request.user.username, _ip_do_cliente(request)
+    )
+    messages.success(request, f"Obra {id_obra} excluída com sucesso.")
+
+    from django.http import HttpResponse
+    if request.headers.get('HX-Request'):
+        response = HttpResponse(status=204)
+        response['HX-Redirect'] = reverse('zona_exclusao')
+        return response
+    return redirect('zona_exclusao')

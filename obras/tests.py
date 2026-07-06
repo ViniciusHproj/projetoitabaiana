@@ -28,6 +28,7 @@ from pymongo import MongoClient
 
 from obras import views as obras_views
 from obras.views import (
+    _extrair_public_id_cloudinary,
     _gerar_form_token,
     _ip_do_cliente,
     data_e_valida,
@@ -1072,12 +1073,17 @@ class LoginViewTestCase(MongoTesteBase):
         resposta = self.client.get("/login/")
         self.assertEqual(resposta.status_code, 200)
 
-    def test_usuario_ja_logado_pode_acessar_login_novamente(self):
-        """Não há redirecionamento automático para usuário já autenticado — login
-        é uma página pública que pode ser exibida mesmo logado."""
+    def test_usuario_ja_logado_e_redirecionado_para_inicio(self):
+        """Usuário autenticado que acessa GET /login/ é redirecionado para /inicio/."""
         self.client.force_login(self.user)
         resposta = self.client.get("/login/")
-        self.assertEqual(resposta.status_code, 200)
+        self.assertRedirects(resposta, '/inicio/')
+
+    def test_usuario_ja_logado_post_login_e_redirecionado(self):
+        """POST para /login/ de usuário já autenticado redireciona para /inicio/ sem processar."""
+        self.client.force_login(self.user)
+        resposta = self.client.post("/login/", {"username": self.cpf, "password": SENHA_FORTE})
+        self.assertRedirects(resposta, '/inicio/')
 
     # ------------------------------------------------------------------
     # Conta superuser sem first_name (bug corrigido — IndexError)
@@ -1190,6 +1196,20 @@ class GaleriaObraPublicaTestCase(MongoTesteBase):
     def test_galeria_sem_login_retorna_200(self):
         resposta = self.client.get("/galeria/12026/")
         self.assertEqual(resposta.status_code, 200)
+
+    def test_galeria_com_timelapse_exibe_datas(self):
+        """mapa_datas deve cruzar URLs de galeria com datas do timelapse."""
+        from datetime import datetime
+        url_foto = "https://res.cloudinary.com/teste/foto.jpg"
+        self.colecao_timelapse.insert_one({
+            "ID_OBRA": "12026",
+            "URL_FOTO": url_foto,
+            "DATA_REGISTRO": "01/01/2026",
+            "TIMESTAMP": datetime(2026, 1, 1),
+        })
+        resposta = self.client.get("/galeria/12026/")
+        self.assertEqual(resposta.status_code, 200)
+        self.assertContains(resposta, "01/01/2026")
 
 
 # ==============================================================================
@@ -1346,6 +1366,25 @@ class BuscaObraTestCase(MongoTesteBase):
 
     def test_get_retorna_200(self):
         resposta = self.client.get("/atualizar-obra/", HTTP_HX_REQUEST="true")
+        self.assertEqual(resposta.status_code, 200)
+
+    def test_post_com_id_vazio_retorna_erro_sem_query(self):
+        """POST com ID_OBRA vazio deve retornar erro sem ir ao MongoDB."""
+        resposta = self.client.post(
+            "/atualizar-obra/",
+            {"ID_OBRA": ""},
+            HTTP_HX_REQUEST="true",
+        )
+        self.assertEqual(resposta.status_code, 200)
+        # Nenhuma obra deve ter sido modificada
+        self.assertEqual(self.colecao_obras.count_documents({}), 1)
+
+    def test_post_com_id_espacos_retorna_erro(self):
+        resposta = self.client.post(
+            "/atualizar-obra/",
+            {"ID_OBRA": "   "},
+            HTTP_HX_REQUEST="true",
+        )
         self.assertEqual(resposta.status_code, 200)
 
 
@@ -1857,3 +1896,232 @@ class BuscaObraSessionTestCase(MongoTesteBase):
             HTTP_HX_REQUEST="true",
         )
         self.assertEqual(resposta.status_code, 200)
+
+
+# ==============================================================================
+# _EXTRAIR_PUBLIC_ID_CLOUDINARY — UNIT TESTS (sem Mongo)
+# ==============================================================================
+
+class ExtrairPublicIdCloudinaryTestCase(TestCase):
+    """Testa a função pura de extração de public_id de URLs do Cloudinary."""
+
+    def test_url_com_versao_retorna_public_id_sem_versao(self):
+        url = "https://res.cloudinary.com/demo/image/upload/v1234567890/obras/foto.jpg"
+        self.assertEqual(_extrair_public_id_cloudinary(url), "obras/foto")
+
+    def test_url_sem_versao_retorna_public_id(self):
+        url = "https://res.cloudinary.com/demo/image/upload/obras/foto.jpg"
+        self.assertEqual(_extrair_public_id_cloudinary(url), "obras/foto")
+
+    def test_url_sem_upload_retorna_none(self):
+        url = "https://res.cloudinary.com/demo/image/foto.jpg"
+        self.assertIsNone(_extrair_public_id_cloudinary(url))
+
+    def test_url_invalida_retorna_none(self):
+        self.assertIsNone(_extrair_public_id_cloudinary("nao-e-uma-url"))
+
+    def test_url_vazia_retorna_none(self):
+        self.assertIsNone(_extrair_public_id_cloudinary(""))
+
+    def test_url_com_extensao_webp_retorna_sem_extensao(self):
+        url = "https://res.cloudinary.com/demo/image/upload/v111/pasta/img.webp"
+        self.assertEqual(_extrair_public_id_cloudinary(url), "pasta/img")
+
+    def test_url_com_multiplos_subdiretorios_preserva_caminho(self):
+        url = "https://res.cloudinary.com/demo/image/upload/v1/a/b/c/foto.png"
+        self.assertEqual(_extrair_public_id_cloudinary(url), "a/b/c/foto")
+
+
+# ==============================================================================
+# ZONA DE EXCLUSÃO — ACESSO E LISTAGEM
+# ==============================================================================
+
+class ZonaExclusaoAcessoTestCase(MongoTesteBase):
+    """Testa controle de acesso e renderização da zona_exclusao."""
+
+    def setUp(self):
+        super().setUp()
+        self.supervisor = User.objects.create_user(
+            username="52998224725", password=SENHA_FORTE, is_staff=True, first_name="Supervisor"
+        )
+        self.comum = User.objects.create_user(
+            username=CPF_VALIDO, password=SENHA_FORTE, first_name="Comum"
+        )
+        self.colecao_obras.insert_one({
+            "ID_OBRA": "12026",
+            "TIPO_OBRA": "PAVIMENTAÇÃO",
+            "SITUACAO": "Em andamento",
+            "ENDERECO": "Rua de Teste, 123",
+            "DATA_CADASTRO": "01/01/2026 10:00:00",
+            "GALERIA": [],
+            "TIMESTAMP_CADASTRO": __import__("datetime").datetime.now(),
+        })
+
+    def test_nao_autenticado_redireciona_para_login_com_next(self):
+        resposta = self.client.get("/zona-exclusao/")
+        self.assertTrue(resposta.url.startswith("/login/"))
+        self.assertIn("zona-exclusao", resposta.url)
+
+    def test_funcionario_comum_e_redirecionado_para_inicio(self):
+        self.client.force_login(self.comum)
+        resposta = self.client.get("/zona-exclusao/")
+        self.assertRedirects(resposta, "/inicio/")
+
+    def test_supervisor_acessa_htmx_retorna_200(self):
+        self.client.force_login(self.supervisor)
+        resposta = self.client.get("/zona-exclusao/", HTTP_HX_REQUEST="true")
+        self.assertEqual(resposta.status_code, 200)
+
+    def test_supervisor_acessa_direto_retorna_200(self):
+        self.client.force_login(self.supervisor)
+        resposta = self.client.get("/zona-exclusao/")
+        self.assertEqual(resposta.status_code, 200)
+
+    def test_obras_aparecem_na_listagem(self):
+        self.client.force_login(self.supervisor)
+        resposta = self.client.get("/zona-exclusao/", HTTP_HX_REQUEST="true")
+        self.assertContains(resposta, "12026")
+
+    def test_zona_exclusao_ausente_do_acesso_nao_autenticado(self):
+        """Confirma que a rota entra corretamente na lista de endpoints protegidos."""
+        resposta = self.client.get("/zona-exclusao/")
+        self.assertFalse(self.client.session.get("_auth_user_id"))
+
+
+# ==============================================================================
+# ZONA DE EXCLUSÃO — DELEÇÃO DE OBRAS
+# ==============================================================================
+
+class DeletarObraTestCase(MongoTesteBase):
+    """Testa a view deletar_obra: acesso, exclusão do Mongo, timelapse e respostas."""
+
+    ID_OBRA_TESTE = "12026"
+
+    def setUp(self):
+        super().setUp()
+        self.supervisor = User.objects.create_user(
+            username="52998224725", password=SENHA_FORTE, is_staff=True, first_name="Supervisor"
+        )
+        self.comum = User.objects.create_user(
+            username=CPF_VALIDO, password=SENHA_FORTE, first_name="Comum"
+        )
+        self.colecao_obras.insert_one({
+            "ID_OBRA": self.ID_OBRA_TESTE,
+            "TIPO_OBRA": "PAVIMENTAÇÃO",
+            "SITUACAO": "Em andamento",
+            "ENDERECO": "Rua A",
+            "GALERIA": ["https://res.cloudinary.com/demo/image/upload/v1/obras/foto.jpg"],
+            "TIMESTAMP_CADASTRO": __import__("datetime").datetime.now(),
+        })
+        self.colecao_timelapse.insert_one({
+            "ID_OBRA": self.ID_OBRA_TESTE,
+            "URL": "https://res.cloudinary.com/demo/image/upload/v1/tl/foto.jpg",
+        })
+
+    # ------------------------------------------------------------------
+    # Controle de acesso
+    # ------------------------------------------------------------------
+
+    def test_nao_autenticado_redireciona_para_login(self):
+        resposta = self.client.post("/deletar-obra/", {"id_obra": self.ID_OBRA_TESTE})
+        self.assertTrue(resposta.url.startswith("/login/"))
+
+    def test_funcionario_comum_e_redirecionado_para_inicio(self):
+        self.client.force_login(self.comum)
+        resposta = self.client.post("/deletar-obra/", {"id_obra": self.ID_OBRA_TESTE})
+        self.assertRedirects(resposta, "/inicio/")
+        # Obra não deve ter sido deletada
+        self.assertEqual(self.colecao_obras.count_documents({"ID_OBRA": self.ID_OBRA_TESTE}), 1)
+
+    def test_get_nao_permitido_retorna_405(self):
+        self.client.force_login(self.supervisor)
+        resposta = self.client.get("/deletar-obra/")
+        self.assertEqual(resposta.status_code, 405)
+
+    # ------------------------------------------------------------------
+    # Fluxo feliz
+    # ------------------------------------------------------------------
+
+    @patch("obras.views.cloudinary.uploader.destroy")
+    def test_supervisor_deleta_obra_existente(self, mock_destroy):
+        self.client.force_login(self.supervisor)
+        self.client.post("/deletar-obra/", {"id_obra": self.ID_OBRA_TESTE, "form_token": _gerar_form_token()})
+        self.assertEqual(self.colecao_obras.count_documents({"ID_OBRA": self.ID_OBRA_TESTE}), 0)
+
+    @patch("obras.views.cloudinary.uploader.destroy")
+    def test_timelapse_e_deletado_junto_com_a_obra(self, mock_destroy):
+        self.client.force_login(self.supervisor)
+        self.client.post("/deletar-obra/", {"id_obra": self.ID_OBRA_TESTE, "form_token": _gerar_form_token()})
+        self.assertEqual(self.colecao_timelapse.count_documents({"ID_OBRA": self.ID_OBRA_TESTE}), 0)
+
+    @patch("obras.views.cloudinary.uploader.destroy")
+    def test_cloudinary_destroy_e_chamado_para_cada_foto(self, mock_destroy):
+        self.client.force_login(self.supervisor)
+        self.client.post("/deletar-obra/", {"id_obra": self.ID_OBRA_TESTE, "form_token": _gerar_form_token()})
+        mock_destroy.assert_called_once()
+        # Verifica que o public_id extraído foi passado corretamente
+        args, _ = mock_destroy.call_args
+        self.assertIn("obras/foto", args[0])
+
+    @patch("obras.views.cloudinary.uploader.destroy")
+    def test_resposta_htmx_tem_hx_redirect(self, mock_destroy):
+        self.client.force_login(self.supervisor)
+        resposta = self.client.post(
+            "/deletar-obra/",
+            {"id_obra": self.ID_OBRA_TESTE, "form_token": _gerar_form_token()},
+            HTTP_HX_REQUEST="true",
+        )
+        self.assertEqual(resposta.status_code, 204)
+        self.assertIn("HX-Redirect", resposta)
+
+    @patch("obras.views.cloudinary.uploader.destroy")
+    def test_resposta_nao_htmx_redireciona_normalmente(self, mock_destroy):
+        self.client.force_login(self.supervisor)
+        resposta = self.client.post("/deletar-obra/", {"id_obra": self.ID_OBRA_TESTE, "form_token": _gerar_form_token()})
+        self.assertRedirects(resposta, "/zona-exclusao/", fetch_redirect_response=False)
+
+    # ------------------------------------------------------------------
+    # Casos de erro
+    # ------------------------------------------------------------------
+
+    def test_id_vazio_nao_deleta_nada(self):
+        self.client.force_login(self.supervisor)
+        self.client.post("/deletar-obra/", {"id_obra": "", "form_token": _gerar_form_token()})
+        self.assertEqual(self.colecao_obras.count_documents({}), 1)
+
+    def test_id_obra_inexistente_nao_quebra(self):
+        self.client.force_login(self.supervisor)
+        resposta = self.client.post("/deletar-obra/", {"id_obra": "99999", "form_token": _gerar_form_token()})
+        # Deve redirecionar com mensagem de erro, sem 500
+        self.assertEqual(resposta.status_code, 302)
+
+    @patch("obras.views.cloudinary.uploader.destroy", side_effect=Exception("Cloudinary fora"))
+    def test_falha_no_cloudinary_nao_impede_exclusao_do_mongo(self, mock_destroy):
+        """Cloudinary é melhor esforço — falha não deve impedir a deleção da obra."""
+        self.client.force_login(self.supervisor)
+        self.client.post("/deletar-obra/", {"id_obra": self.ID_OBRA_TESTE, "form_token": _gerar_form_token()})
+        # Obra ainda deve ter sido deletada do Mongo mesmo com Cloudinary falhando
+        self.assertEqual(self.colecao_obras.count_documents({"ID_OBRA": self.ID_OBRA_TESTE}), 0)
+
+    # ------------------------------------------------------------------
+    # Acesso sem autenticação à zona de exclusão (complementa AcessoNaoAutenticadoTestCase)
+    # ------------------------------------------------------------------
+
+    def test_zona_exclusao_get_redireciona_para_login(self):
+        resposta = self.client.get("/zona-exclusao/")
+        self.assertTrue(resposta.url.startswith("/login/"))
+
+    def test_token_ausente_e_rejeitado(self):
+        """POST sem form_token deve ser rejeitado pelo guard de idempotência."""
+        self.client.force_login(self.supervisor)
+        resposta = self.client.post("/deletar-obra/", {"id_obra": self.ID_OBRA_TESTE})
+        self.assertEqual(self.colecao_obras.count_documents({"ID_OBRA": self.ID_OBRA_TESTE}), 1)
+        self.assertRedirects(resposta, "/zona-exclusao/", fetch_redirect_response=False)
+
+    @patch("obras.views.cloudinary.uploader.destroy")
+    def test_audit_log_registra_exclusao(self, mock_destroy):
+        """Deve emitir logger.warning com ID da obra e usuário ao deletar com sucesso."""
+        self.client.force_login(self.supervisor)
+        with self.assertLogs("obras.views", level="WARNING") as cm:
+            self.client.post("/deletar-obra/", {"id_obra": self.ID_OBRA_TESTE, "form_token": _gerar_form_token()})
+        self.assertTrue(any(self.ID_OBRA_TESTE in line for line in cm.output))
