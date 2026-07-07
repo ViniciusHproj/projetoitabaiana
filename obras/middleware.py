@@ -74,10 +74,8 @@ class SessaoExpiradaMiddleware:
         eh_rota_login = request.path == reverse('login')
 
         if sessao_invalida and not eh_rota_logout and not eh_rota_login:
-            messages.warning(
-                request,
-                "Sua sessão expirou por inatividade. Faça login novamente."
-            )
+            request.session['aviso_login'] = 'inatividade'
+            return redirect('login')
 
         return response
 

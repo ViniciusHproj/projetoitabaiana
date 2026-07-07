@@ -1117,9 +1117,10 @@ class LogoutViewTestCase(MongoTesteBase):
         resposta = self.client.post("/logout/")
         self.assertIn("/login/", resposta.url)
 
-    def test_logout_por_inatividade_redireciona_com_aviso(self):
+    def test_logout_por_inatividade_redireciona_para_login_com_flag_sessao(self):
         resposta = self.client.post("/logout/", {"motivo": "inatividade"})
-        self.assertIn("inatividade", resposta.url)
+        self.assertIn("/login/", resposta.url)
+        self.assertEqual(self.client.session.get('aviso_login'), 'inatividade')
 
     def test_logout_get_retorna_405(self):
         resposta = self.client.get("/logout/")

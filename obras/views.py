@@ -484,13 +484,11 @@ def login_view(request):
         if request.user.is_authenticated:
             return redirect('inicio')
         aviso = request.GET.get('aviso', '')
-        if aviso == 'inatividade':
-            messages.warning(request, "Sua sessão foi encerrada automaticamente por inatividade. Faça login novamente.")
-            return redirect('login')
-        elif aviso == 'saiu':
+        if aviso == 'saiu':
             messages.info(request, "Sessão encerrada com sucesso.")
             return redirect('login')
-        return render(request, 'login.html')
+        aviso_sessao = request.session.pop('aviso_login', '')
+        return render(request, 'login.html', {'aviso_login': aviso_sessao})
 
     if request.method == 'POST':
         if request.user.is_authenticated:
@@ -579,7 +577,8 @@ def logout_view(request):
     if request.user.is_authenticated:
         auth_logout(request)
     if motivo == 'inatividade':
-        return redirect('/login/?aviso=inatividade')
+        request.session['aviso_login'] = 'inatividade'
+        return redirect('login')
     return redirect('/login/?aviso=saiu')
 
 def staff_required(view_func):

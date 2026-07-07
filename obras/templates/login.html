@@ -22,6 +22,27 @@
   [data-theme="dark"] .aviso-next strong {
     color: #fef08a;
   }
+  .aviso-inatividade {
+    background-color: #fff3cd;
+    color: #856404;
+    border: 1px solid #ffeeba;
+    border-left: 4px solid #f59e0b;
+    padding: 14px 16px;
+    border-radius: 8px;
+    font-size: .875rem;
+    margin-bottom: 20px;
+    text-align: left;
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    line-height: 1.5;
+  }
+  [data-theme="dark"] .aviso-inatividade {
+    background-color: rgba(234, 179, 8, 0.1);
+    color: #fde68a;
+    border-color: rgba(234, 179, 8, 0.3);
+    border-left-color: #f59e0b;
+  }
 </style>
 {% endblock %}
 
@@ -75,6 +96,15 @@
       </div>
     {% endif %}
 
+    {% if aviso_login == 'inatividade' %}
+    <div class="aviso-inatividade">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#b45309" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;margin-top:1px;">
+        <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+      </svg>
+      <div>Sua sessão foi encerrada por <strong>inatividade</strong>. Faça login novamente para continuar.</div>
+    </div>
+    {% endif %}
+
     {% if messages %}
       {% for message in messages %}
         {% if message.tags == 'error' %}
@@ -95,14 +125,14 @@
       <div style="text-align:left;margin-bottom:15px;">
         <label for="id_username" style="display:block;margin-bottom:8px;font-weight:600;color:#555;">Usuário ou CPF:</label>
         <input type="text" name="username" id="id_username" required
-               placeholder="Digite seu CPF"
+               placeholder="Digite seu CPF" autocomplete="username"
                style="width:100%;padding:12px;border:1px solid #ddd;border-radius:6px;box-sizing:border-box;font-size:16px;outline-color:#007bff;">
       </div>
 
       <div style="text-align:left;margin-bottom:25px;">
         <label for="id_password" style="display:block;margin-bottom:8px;font-weight:600;color:#555;">Senha:</label>
         <input type="password" name="password" id="id_password" required
-               placeholder="••••••••"
+               placeholder="••••••••" autocomplete="current-password"
                style="width:100%;padding:12px;border:1px solid #ddd;border-radius:6px;box-sizing:border-box;font-size:16px;outline-color:#007bff;">
       </div>
 
