@@ -1,4 +1,5 @@
 import os
+import json
 import logging
 import threading
 import time
@@ -339,30 +340,116 @@ def _token_ja_usado(token):
     # Evita race condition de dois POSTs simultâneos passando pelo get+set separado.
     return not cache.add(chave, True, 300)
 
-def _metricas_obras():
+def dashboard_publico(request):
     try:
+        # Cards de topo
         total = colecao_obras.count_documents({})
-        em_andamento = colecao_obras.count_documents({"SITUACAO": "Em andamento"})
+        em_execucao = colecao_obras.count_documents({"SITUACAO": "Em andamento"})
         finalizadas = colecao_obras.count_documents({"SITUACAO": {"$in": [
             "Finalizada por conclusão de construção", "Finalizada por distrato"
         ]}})
         paralisadas = colecao_obras.count_documents({"SITUACAO": {"$in": ["Paralisada", "Cancelada"]}})
-        return {"total": total, "em_andamento": em_andamento, "finalizadas": finalizadas, "paralisadas": paralisadas}
+
+        # VALOR_OBRA é salvo como string BR (ex: "1.234,56") — converter em Python
+        def _valor_para_float(v):
+            if not v or v == '—':
+                return 0.0
+            try:
+                return float(str(v).replace('.', '').replace(',', '.'))
+            except (ValueError, TypeError):
+                return 0.0
+
+        # Investimento total — somar em Python pois $sum ignora strings
+        todos_valores = list(colecao_obras.find({}, {"VALOR_OBRA": 1, "_id": 0}))
+        investimento_total = sum(_valor_para_float(d.get("VALOR_OBRA")) for d in todos_valores)
+
+        # Status das obras (para gráfico de barras por situação)
+        pipeline_status = [{"$group": {"_id": "$SITUACAO", "count": {"$sum": 1}}}]
+        status_raw = list(colecao_obras.aggregate(pipeline_status))
+        status_labels = [s["_id"] or "Não informado" for s in status_raw]
+        status_counts = [s["count"] for s in status_raw]
+
+        # Total de obras por ano (DATA_INICIO, formato DD/MM/AAAA)
+        pipeline_ano = [
+            {"$addFields": {"ano": {"$substr": ["$DATA_INICIO", 6, 4]}}},
+            {"$match": {"ano": {"$regex": "^[0-9]{4}$"}}},
+            {"$group": {"_id": "$ano", "count": {"$sum": 1}}},
+            {"$sort": {"_id": 1}},
+        ]
+        anos_raw = list(colecao_obras.aggregate(pipeline_ano))
+        anos_labels = [a["_id"] for a in anos_raw]
+        anos_counts = [a["count"] for a in anos_raw]
+
+        # Investimento por ano — agrupar em Python (VALOR_OBRA é string BR)
+        docs_invest_ano = list(colecao_obras.find(
+            {"DATA_INICIO": {"$regex": r"^\d{2}/\d{2}/\d{4}$"}},
+            {"DATA_INICIO": 1, "VALOR_OBRA": 1, "_id": 0}
+        ))
+        invest_por_ano = {}
+        for d in docs_invest_ano:
+            ano = d.get("DATA_INICIO", "")[-4:]
+            if ano.isdigit():
+                invest_por_ano[ano] = invest_por_ano.get(ano, 0) + _valor_para_float(d.get("VALOR_OBRA"))
+        invest_anos_labels = sorted(invest_por_ano.keys())
+        invest_anos_values = [round(invest_por_ano[a] / 1_000_000, 4) for a in invest_anos_labels]
+
+        # Tipo de execução (pizza)
+        pipeline_tipo = [{"$group": {"_id": "$TIPO_EXECUCAO", "count": {"$sum": 1}}}]
+        tipo_raw = list(colecao_obras.aggregate(pipeline_tipo))
+        tipo_labels = [t["_id"] or "Não informado" for t in tipo_raw]
+        tipo_counts = [t["count"] for t in tipo_raw]
+
+        # Top 5 empresas
+        pipeline_emp = [
+            {"$match": {"EMPRESA_CONTRATADA": {"$nin": [None, "", "—"]}}},
+            {"$group": {"_id": "$EMPRESA_CONTRATADA", "count": {"$sum": 1}}},
+            {"$sort": {"count": -1}},
+            {"$limit": 5},
+        ]
+        empresas_raw = list(colecao_obras.aggregate(pipeline_emp))
+        empresas = [{"nome": e["_id"], "count": e["count"]} for e in empresas_raw]
+
+        ctx = {
+            "total": total,
+            "em_execucao": em_execucao,
+            "finalizadas": finalizadas,
+            "paralisadas": paralisadas,
+            "investimento_total": investimento_total,
+            "status_labels": json.dumps(status_labels),
+            "status_counts": json.dumps(status_counts),
+            "anos_labels": json.dumps(anos_labels),
+            "anos_counts": json.dumps(anos_counts),
+            "invest_anos_labels": json.dumps(invest_anos_labels),
+            "invest_anos_values": json.dumps(invest_anos_values),
+            "tipo_labels": json.dumps(tipo_labels),
+            "tipo_counts": json.dumps(tipo_counts),
+            "empresas": empresas,
+        }
     except Exception:
-        return {"total": "—", "em_andamento": "—", "finalizadas": "—", "paralisadas": "—"}
+        ctx = {
+            "total": "—", "em_execucao": "—", "finalizadas": "—", "paralisadas": "—",
+            "investimento_total": 0,
+            "status_labels": json.dumps([]), "status_counts": json.dumps([]),
+            "anos_labels": json.dumps([]), "anos_counts": json.dumps([]),
+            "invest_anos_labels": json.dumps([]), "invest_anos_values": json.dumps([]),
+            "tipo_labels": json.dumps([]), "tipo_counts": json.dumps([]),
+            "empresas": [],
+        }
+
+    if request.headers.get('HX-Request'):
+        return render(request, 'dashboard_obras.html', ctx)
+    return render(request, 'index.html', {**ctx, 'template_meio': 'dashboard_obras.html'})
 
 
 def pagina_inicial(request):
-    ctx = {"metricas": _metricas_obras()}
     if request.headers.get('HX-Request'):
-        return render(request, 'inicio_partial.html', ctx)
-    return render(request, 'index.html', ctx)
+        return render(request, 'inicio_partial.html')
+    return render(request, 'index.html')
 
 def index(request):
-    ctx = {"metricas": _metricas_obras()}
     if request.headers.get('HX-Request'):
-        return render(request, 'inicio_partial.html', ctx)
-    return render(request, 'index.html', ctx)
+        return render(request, 'inicio_partial.html')
+    return render(request, 'index.html')
 
 
 def data_e_valida(data_str, tipo="geral"):

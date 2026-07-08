@@ -570,12 +570,6 @@ body {
     color: #ffffff !important;
 }
 
-/* Textos do metric-card e tela inicial em dark */
-[data-theme="dark"] .metric-label,
-[data-theme="dark"] .metric-value,
-[data-theme="dark"] .metric-desc {
-    color: #ffffff !important;
-}
 
 [data-theme="dark"] .sidebar-section-label {
     color: rgba(255,255,255,0.55) !important;

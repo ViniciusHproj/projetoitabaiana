@@ -30,42 +30,6 @@
     <p style="font-size: 13.5px; color: var(--welcome-text, #5a7fa0);">Indicadores em tempo real das obras do município de Itabaiana.</p>
 </div>
 
-<!-- Cards de métricas -->
-<div class="metrics-grid">
-    <div class="metric-card">
-        <div class="metric-icon">
-            <svg viewBox="0 0 24 24"><rect x="2" y="10" width="20" height="10" rx="2"/><rect x="6" y="6" width="12" height="5" rx="1"/><rect x="10" y="3" width="4" height="4" rx="1"/></svg>
-        </div>
-        <div class="metric-label">Total de obras</div>
-        <div class="metric-value">{{ metricas.total }}</div>
-        <div class="metric-desc">registradas no sistema</div>
-    </div>
-    <div class="metric-card">
-        <div class="metric-icon" style="background: #e8f4ec;">
-            <svg viewBox="0 0 24 24" style="stroke: #237a3d;"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-        </div>
-        <div class="metric-label">Em andamento</div>
-        <div class="metric-value" style="color: #237a3d;">{{ metricas.em_andamento }}</div>
-        <div class="metric-desc">obras em execução</div>
-    </div>
-    <div class="metric-card">
-        <div class="metric-icon" style="background: #e8f1fb;">
-            <svg viewBox="0 0 24 24" style="stroke: #1e5eb8;"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-        </div>
-        <div class="metric-label">Finalizadas</div>
-        <div class="metric-value" style="color: #1e5eb8;">{{ metricas.finalizadas }}</div>
-        <div class="metric-desc">obras concluídas</div>
-    </div>
-    <div class="metric-card">
-        <div class="metric-icon" style="background: #fff4e0;">
-            <svg viewBox="0 0 24 24" style="stroke: #a05e00;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-        </div>
-        <div class="metric-label">Paralisadas</div>
-        <div class="metric-value" style="color: #a05e00;">{{ metricas.paralisadas }}</div>
-        <div class="metric-desc">paradas ou canceladas</div>
-    </div>
-</div>
-
 <!-- Link público + aviso -->
 <div style="display: flex; flex-direction: column; align-items: center; gap: 8px; margin-bottom: 20px;">
     <a hx-get="{% url 'lista_obras' %}" hx-target="#conteudo-dinamico" hx-swap="innerHTML" hx-push-url="true"

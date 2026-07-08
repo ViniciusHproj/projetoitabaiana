@@ -262,6 +262,290 @@ function initZonaExclusao() {
   });
 }
 
+/* ── Dashboard de Obras ── */
+var _dashCharts = [];
+var _dashThemeObserver = null;
+
+function _destruirDashCharts() {
+  _dashCharts.forEach(function(c) { try { c.destroy(); } catch(e) {} });
+  _dashCharts = [];
+}
+
+function initDashboard() {
+  var el = document.getElementById('dashboard-dados');
+  if (!el) return;
+
+  _destruirDashCharts();
+
+  /* Para quando o usuário trocar o tema, recriar os gráficos com as novas cores */
+  if (_dashThemeObserver) _dashThemeObserver.disconnect();
+  _dashThemeObserver = new MutationObserver(function(mutations) {
+    mutations.forEach(function(m) {
+      if (m.attributeName === 'data-theme' && document.getElementById('dashboard-dados')) {
+        _destruirDashCharts();
+        initDashboard();
+      }
+    });
+  });
+  _dashThemeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+
+  var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  var textColor  = isDark ? '#ffffff' : '#1a3050';
+  var titleColor = isDark ? '#ffffff' : '#1a3050';
+  var gridColor  = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.06)';
+  var bgCard     = isDark ? 'rgba(15,23,42,0.6)' : '#ffffff';
+
+  Chart.defaults.color = textColor;
+  Chart.defaults.font.family = "'DM Sans', sans-serif";
+  Chart.defaults.font.size = 11;
+
+  /* Cores semânticas fixas por significado */
+  var COR_STATUS = {
+    'Em andamento':                          '#16a34a',
+    'Finalizada por conclusão de construção':'#2563eb',
+    'Finalizada por distrato':               '#3b82f6',
+    'Paralisada':                            '#d97706',
+    'Cancelada':                             '#dc2626',
+    'Não informado':                         '#94a3b8',
+  };
+  var CORES_PALETTE = ['#3b7dd8','#16a34a','#d97706','#dc2626','#7c3aed','#0891b2','#d35400','#059669','#7f8c8d','#c0392b'];
+
+  function corPorLabel(label) {
+    return COR_STATUS[label] || CORES_PALETTE[0];
+  }
+
+  /* Tooltip rico: percentual + valor */
+  function tooltipRico(total) {
+    return {
+      callbacks: {
+        label: function(ctx) {
+          var val = ctx.parsed.x !== undefined ? ctx.parsed.x : ctx.parsed.y;
+          if (val === undefined) val = ctx.parsed;
+          var pct = total > 0 ? ((val / total) * 100).toFixed(1) : 0;
+          return ' ' + ctx.dataset.label + ': ' + val + ' (' + pct + '%)';
+        }
+      },
+      backgroundColor: isDark ? 'rgba(15,23,42,0.95)' : 'rgba(255,255,255,0.97)',
+      titleColor: titleColor,
+      bodyColor: textColor,
+      borderColor: isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.1)',
+      borderWidth: 1,
+      padding: 10,
+      cornerRadius: 8,
+    };
+  }
+
+  function scaleOpts() {
+    return {
+      x: { grid: { color: gridColor }, ticks: { color: textColor, precision: 0 }, border: { color: gridColor } },
+      y: { grid: { color: gridColor }, ticks: { color: textColor, precision: 0 }, border: { color: gridColor }, beginAtZero: true },
+    };
+  }
+
+  var statusLabels = JSON.parse(el.dataset.statusLabels);
+  var statusCounts = JSON.parse(el.dataset.statusCounts);
+  var anosLabels   = JSON.parse(el.dataset.anosLabels);
+  var anosCounts   = JSON.parse(el.dataset.anosCounts);
+  var tipoLabels   = JSON.parse(el.dataset.tipoLabels);
+  var tipoCounts   = JSON.parse(el.dataset.tipoCounts);
+  var invLabels    = JSON.parse(el.dataset.investAnosLabels);
+  var invValues    = JSON.parse(el.dataset.investAnosValues);
+  var totalObras   = parseInt(el.dataset.total) || 1;
+
+  var statusBgColors = statusLabels.map(corPorLabel);
+
+  /* ── Gráfico: Status (barras horizontais) com rótulos dentro ── */
+  _dashCharts.push(new Chart(document.getElementById('chart-status'), {
+    type: 'bar',
+    data: {
+      labels: statusLabels,
+      datasets: [{
+        label: 'Obras',
+        data: statusCounts,
+        backgroundColor: statusBgColors.map(function(c) { return c + (isDark ? 'bb' : 'dd'); }),
+        borderColor: statusBgColors,
+        borderWidth: 1.5,
+        borderRadius: 6,
+        borderSkipped: false,
+      }]
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      maintainAspectRatio: true,
+      plugins: {
+        legend: { display: false },
+        tooltip: tooltipRico(totalObras),
+        datalabels: false,
+      },
+      scales: {
+        x: { grid: { color: gridColor }, ticks: { color: textColor, precision: 0 }, border: { color: gridColor } },
+        y: { grid: { display: false }, ticks: { color: textColor }, border: { display: false } },
+      },
+    },
+  }));
+
+  /* ── Gráfico: Obras por ano (linha com área) ── */
+  _dashCharts.push(new Chart(document.getElementById('chart-anos'), {
+    type: 'line',
+    data: {
+      labels: anosLabels,
+      datasets: [{
+        label: 'Obras',
+        data: anosCounts,
+        borderColor: '#3b7dd8',
+        backgroundColor: isDark ? 'rgba(59,125,216,0.18)' : 'rgba(59,125,216,0.10)',
+        tension: 0.4,
+        fill: true,
+        pointRadius: 5,
+        pointBackgroundColor: '#3b7dd8',
+        pointBorderColor: isDark ? '#1e293b' : '#fff',
+        pointBorderWidth: 2,
+        pointHoverRadius: 7,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: true,
+      plugins: {
+        legend: { display: false },
+        tooltip: tooltipRico(totalObras),
+      },
+      scales: scaleOpts(),
+    },
+  }));
+
+  /* ── Gráfico: Tipo de execução (doughnut) ── */
+  var tipoBgColors = tipoLabels.map(function(_, i) { return CORES_PALETTE[i % CORES_PALETTE.length]; });
+  _dashCharts.push(new Chart(document.getElementById('chart-tipo'), {
+    type: 'doughnut',
+    data: {
+      labels: tipoLabels,
+      datasets: [{
+        data: tipoCounts,
+        backgroundColor: tipoBgColors.map(function(c) { return c + 'cc'; }),
+        borderColor: tipoBgColors,
+        borderWidth: 2,
+        hoverOffset: 6,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: true,
+      cutout: '62%',
+      plugins: {
+        legend: {
+          position: 'bottom',
+          labels: { color: textColor, boxWidth: 10, padding: 10, font: { size: 11 } }
+        },
+        tooltip: {
+          callbacks: {
+            label: function(ctx) {
+              var total = ctx.dataset.data.reduce(function(a, b) { return a + b; }, 0);
+              var pct = total > 0 ? ((ctx.parsed / total) * 100).toFixed(1) : 0;
+              return ' ' + ctx.label + ': ' + ctx.parsed + ' (' + pct + '%)';
+            }
+          },
+          backgroundColor: isDark ? 'rgba(15,23,42,0.95)' : 'rgba(255,255,255,0.97)',
+          titleColor: titleColor,
+          bodyColor: textColor,
+          borderColor: isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.1)',
+          borderWidth: 1,
+          padding: 10,
+          cornerRadius: 8,
+        },
+      },
+    },
+  }));
+
+  /* ── Gráfico: Investimento por ano (barras verticais) ── */
+  _dashCharts.push(new Chart(document.getElementById('chart-invest-ano'), {
+    type: 'bar',
+    data: {
+      labels: invLabels,
+      datasets: [{
+        label: 'R$ mi',
+        data: invValues,
+        backgroundColor: isDark ? 'rgba(124,58,237,0.70)' : 'rgba(59,125,216,0.75)',
+        borderColor:     isDark ? '#7c3aed' : '#3b7dd8',
+        borderWidth: 1.5,
+        borderRadius: 6,
+        borderSkipped: false,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: true,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: function(ctx) {
+              return ' R$ ' + ctx.parsed.y.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) + ' mi';
+            }
+          },
+          backgroundColor: isDark ? 'rgba(15,23,42,0.95)' : 'rgba(255,255,255,0.97)',
+          titleColor: titleColor,
+          bodyColor: textColor,
+          borderColor: isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.1)',
+          borderWidth: 1,
+          padding: 10,
+          cornerRadius: 8,
+        },
+      },
+      scales: scaleOpts(),
+    },
+  }));
+
+  /* ── Animação de contagem nos cards ── */
+  function animarContagem(el, alvo, duracao) {
+    var inicio = performance.now();
+    var ehNumero = !isNaN(parseInt(alvo));
+    if (!ehNumero) { el.textContent = alvo; return; }
+    alvo = parseInt(alvo);
+    function step(agora) {
+      var progresso = Math.min((agora - inicio) / duracao, 1);
+      var ease = 1 - Math.pow(1 - progresso, 3);
+      el.textContent = Math.round(alvo * ease);
+      if (progresso < 1) requestAnimationFrame(step);
+    }
+    requestAnimationFrame(step);
+  }
+
+  document.querySelectorAll('[data-count]').forEach(function(el) {
+    animarContagem(el, el.dataset.count, 900);
+  });
+
+  /* Investimento total formatado */
+  var investEl = document.querySelector('[data-invest]');
+  if (investEl) {
+    var valorInvest = parseFloat(investEl.dataset.invest) || 0;
+    var inicio = performance.now();
+    (function step(agora) {
+      var p = Math.min((agora - inicio) / 900, 1);
+      var ease = 1 - Math.pow(1 - p, 3);
+      var val = valorInvest * ease;
+      investEl.textContent = 'R$ ' + val.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      if (p < 1) requestAnimationFrame(step);
+    })(performance.now());
+  }
+
+  /* ── Barras de progresso ── */
+  requestAnimationFrame(function() {
+    document.querySelectorAll('.dash-progress-fill').forEach(function(bar) {
+      var pct;
+      if (bar.dataset.fill) {
+        pct = parseFloat(bar.dataset.fill);
+      } else {
+        var of    = parseFloat(bar.dataset.fillOf)    || 0;
+        var total = parseFloat(bar.dataset.fillTotal) || 1;
+        pct = Math.round((of / total) * 100);
+      }
+      bar.style.width = Math.min(pct, 100) + '%';
+    });
+  });
+}
+
 /* ── Modal Galeria ── */
 function initModalGaleria() {
   var overlay = document.getElementById('modal-galeria-overlay');
@@ -335,6 +619,7 @@ function initPartial() {
   if (document.getElementById('form-edita-func'))        initEditaFunc();
   if (document.getElementById('modal-galeria-overlay'))  initModalGaleria();
   if (document.getElementById('modal-exclusao'))         initZonaExclusao();
+  if (document.getElementById('dashboard-dados'))        initDashboard();
 }
 
 /* ── Link ativo na sidebar ── */
@@ -382,5 +667,6 @@ function marcarLinkAtivo() {
   }
 }
 
-document.addEventListener('DOMContentLoaded', function () { initPartial(); marcarLinkAtivo(); });
-document.addEventListener('htmx:afterSwap',   function () { initPartial(); marcarLinkAtivo(); });
+document.addEventListener('DOMContentLoaded',        function () { initPartial(); marcarLinkAtivo(); });
+document.addEventListener('htmx:afterSwap',          function () { initPartial(); marcarLinkAtivo(); });
+document.addEventListener('htmx:pushedIntoHistory',  function () { marcarLinkAtivo(); });

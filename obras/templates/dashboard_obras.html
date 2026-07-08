@@ -1,0 +1,291 @@
+<div data-pagina-scroll hidden></div>
+
+<style>
+/* ── Variáveis de tema ── */
+:root {
+  --dash-bg-card:      #ffffff;
+  --dash-border-card:  #dde6f0;
+  --dash-shadow-card:  0 1px 4px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.07);
+  --dash-text-title:   #1a3050;
+  --dash-text-label:   #475569;
+  --dash-text-muted:   #7a90a8;
+  --dash-text-value:   #0f172a;
+  --dash-progress-bg:  #e8eef6;
+  --dash-chart-bg:     #ffffff;
+}
+[data-theme="dark"] {
+  --dash-bg-card:      rgba(255,255,255,0.06);
+  --dash-border-card:  rgba(255,255,255,0.10);
+  --dash-shadow-card:  0 2px 20px rgba(0,0,0,0.35);
+  --dash-text-title:   #f1f5f9;
+  --dash-text-label:   #94a3b8;
+  --dash-text-muted:   #64748b;
+  --dash-text-value:   #ffffff;
+  --dash-progress-bg:  rgba(255,255,255,0.10);
+  --dash-chart-bg:     rgba(255,255,255,0.04);
+}
+
+/* ── Header ── */
+.dash-header {
+  margin-bottom: 24px;
+}
+.dash-header h1 {
+  font-size: 21px;
+  font-weight: 700;
+  color: var(--dash-text-title);
+  margin-bottom: 3px;
+}
+.dash-header p {
+  font-size: 13px;
+  color: var(--dash-text-label);
+}
+
+/* ── Cards de topo ── */
+.dash-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 14px;
+  margin-bottom: 20px;
+}
+.dash-card {
+  background: var(--dash-bg-card);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--dash-border-card);
+  border-radius: 14px;
+  padding: 18px 20px 16px;
+  box-shadow: var(--dash-shadow-card);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  position: relative;
+  overflow: hidden;
+}
+.dash-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  background: var(--dash-card-accent, #3b7dd8);
+  border-radius: 14px 14px 0 0;
+}
+.dash-card-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+  color: var(--dash-text-label);
+}
+.dash-card-value {
+  font-size: 32px;
+  font-weight: 800;
+  color: var(--dash-card-accent, var(--dash-text-value));
+  line-height: 1;
+  letter-spacing: -1px;
+}
+.dash-card-sub {
+  font-size: 11.5px;
+  color: var(--dash-text-muted);
+}
+/* Barra de progresso */
+.dash-progress {
+  margin-top: 6px;
+  height: 4px;
+  border-radius: 99px;
+  background: var(--dash-progress-bg);
+  overflow: hidden;
+}
+.dash-progress-fill {
+  height: 100%;
+  border-radius: 99px;
+  background: var(--dash-card-accent, #3b7dd8);
+  transition: width 1.1s cubic-bezier(.4,0,.2,1);
+  width: 0;
+}
+
+/* ── Grids de gráficos ── */
+.dash-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+.dash-grid-3 {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+.dash-chart-box {
+  background: var(--dash-chart-bg);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid var(--dash-border-card);
+  border-radius: 14px;
+  padding: 20px;
+  box-shadow: var(--dash-shadow-card);
+}
+.dash-chart-box h3 {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--dash-text-title);
+  margin-bottom: 14px;
+  text-align: center;
+  letter-spacing: 0.1px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.dash-chart-box canvas {
+  max-height: 210px;
+}
+
+/* ── Tabela de empresas ── */
+.dash-empresas {
+  background: var(--dash-chart-bg);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid var(--dash-border-card);
+  border-radius: 14px;
+  padding: 20px;
+  box-shadow: var(--dash-shadow-card);
+}
+.dash-empresas h3 {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--dash-text-title);
+  margin-bottom: 14px;
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.dash-empresa-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--dash-border-card);
+  font-size: 12px;
+  color: var(--dash-text-title);
+}
+.dash-empresa-item:last-child { border-bottom: none; }
+.dash-empresa-num {
+  font-size: 10px;
+  font-weight: 800;
+  color: var(--dash-text-muted);
+  min-width: 18px;
+}
+.dash-empresa-nome {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dash-empresa-count {
+  font-weight: 800;
+  font-size: 13px;
+  color: #3b7dd8;
+  background: rgba(59,125,216,0.12);
+  border-radius: 6px;
+  padding: 2px 8px;
+  min-width: 28px;
+  text-align: center;
+}
+.dash-empty {
+  font-size: 12px;
+  color: var(--dash-text-muted);
+  text-align: center;
+  padding: 20px 0;
+}
+
+@media (max-width: 700px) {
+  .dash-grid, .dash-grid-3 { grid-template-columns: 1fr; }
+  .dash-cards { grid-template-columns: 1fr 1fr; }
+}
+</style>
+
+<div class="dash-header">
+  <h1>Dashboard de Obras</h1>
+  <p>Painel com dados em tempo real — Prefeitura de Itabaiana</p>
+</div>
+
+<!-- Cards de topo -->
+<div class="dash-cards">
+  <div class="dash-card" style="--dash-card-accent:#3b7dd8;">
+    <div class="dash-card-label">Total de obras</div>
+    <div class="dash-card-value" data-count="{{ total }}">0</div>
+    <div class="dash-card-sub">registradas</div>
+    <div class="dash-progress"><div class="dash-progress-fill" data-fill="100"></div></div>
+  </div>
+  <div class="dash-card" style="--dash-card-accent:#16a34a;">
+    <div class="dash-card-label">Em execução</div>
+    <div class="dash-card-value" data-count="{{ em_execucao }}">0</div>
+    <div class="dash-card-sub">em andamento</div>
+    <div class="dash-progress"><div class="dash-progress-fill" data-fill-of="{{ em_execucao }}" data-fill-total="{{ total }}"></div></div>
+  </div>
+  <div class="dash-card" style="--dash-card-accent:#2563eb;">
+    <div class="dash-card-label">Finalizadas</div>
+    <div class="dash-card-value" data-count="{{ finalizadas }}">0</div>
+    <div class="dash-card-sub">concluídas</div>
+    <div class="dash-progress"><div class="dash-progress-fill" data-fill-of="{{ finalizadas }}" data-fill-total="{{ total }}"></div></div>
+  </div>
+  <div class="dash-card" style="--dash-card-accent:#d97706;">
+    <div class="dash-card-label">Paralisadas</div>
+    <div class="dash-card-value" data-count="{{ paralisadas }}">0</div>
+    <div class="dash-card-sub">paradas/canceladas</div>
+    <div class="dash-progress"><div class="dash-progress-fill" data-fill-of="{{ paralisadas }}" data-fill-total="{{ total }}"></div></div>
+  </div>
+  <div class="dash-card" style="--dash-card-accent:#7c3aed;">
+    <div class="dash-card-label">Investimento total</div>
+    <div class="dash-card-value" style="font-size:18px;letter-spacing:-0.5px;" data-invest="{{ investimento_total }}">R$ 0</div>
+    <div class="dash-card-sub">soma de todas as obras</div>
+    <div class="dash-progress"><div class="dash-progress-fill" data-fill="100"></div></div>
+  </div>
+</div>
+
+<!-- Linha 1: Status + Obras por ano -->
+<div class="dash-grid">
+  <div class="dash-chart-box">
+    <h3>Status das Obras</h3>
+    <canvas id="chart-status"></canvas>
+  </div>
+  <div class="dash-chart-box">
+    <h3>Total de Obras por Ano</h3>
+    <canvas id="chart-anos"></canvas>
+  </div>
+</div>
+
+<!-- Linha 2: Tipo + Investimento por ano + Empresas -->
+<div class="dash-grid-3">
+  <div class="dash-chart-box">
+    <h3>Tipo de Execução</h3>
+    <canvas id="chart-tipo"></canvas>
+  </div>
+  <div class="dash-chart-box">
+    <h3>Investimento por Ano (R$ mi)</h3>
+    <canvas id="chart-invest-ano"></canvas>
+  </div>
+  <div class="dash-empresas">
+    <h3>Top Empresas Contratadas</h3>
+    {% for emp in empresas %}
+    <div class="dash-empresa-item">
+      <span class="dash-empresa-num">{{ forloop.counter }}.</span>
+      <span class="dash-empresa-nome" title="{{ emp.nome }}">{{ emp.nome }}</span>
+      <span class="dash-empresa-count">{{ emp.count }}</span>
+    </div>
+    {% empty %}
+    <div class="dash-empty">Nenhum dado disponível</div>
+    {% endfor %}
+  </div>
+</div>
+
+<div id="dashboard-dados"
+     data-status-labels='{{ status_labels|safe }}'
+     data-status-counts='{{ status_counts|safe }}'
+     data-anos-labels='{{ anos_labels|safe }}'
+     data-anos-counts='{{ anos_counts|safe }}'
+     data-tipo-labels='{{ tipo_labels|safe }}'
+     data-tipo-counts='{{ tipo_counts|safe }}'
+     data-invest-anos-labels='{{ invest_anos_labels|safe }}'
+     data-invest-anos-values='{{ invest_anos_values|safe }}'
+     data-total='{{ total }}'
+     hidden></div>
