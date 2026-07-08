@@ -17,7 +17,6 @@ from django.contrib.auth.models import User
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 import cloudinary.uploader
-from functools import wraps
 from django.contrib.auth import authenticate, login as auth_login
 from django.contrib.auth import logout as auth_logout
 from django.contrib.messages import get_messages
@@ -72,8 +71,11 @@ def _bump_cache_obras():
     """Invalida o cache de lista_obras após qualquer cadastro/edição de obra."""
     try:
         cache.incr(CACHE_KEY_VERSAO_OBRAS)
-    except ValueError:
-        cache.set(CACHE_KEY_VERSAO_OBRAS, 1)
+    except Exception:
+        try:
+            cache.set(CACHE_KEY_VERSAO_OBRAS, 1)
+        except Exception:
+            pass
 
 # Cliente único reaproveitado entre requests (pymongo já faz pool de conexões internamente).
 # connect=False adia a resolução de DNS/conexão real para o primeiro uso, em vez de travar
@@ -278,14 +280,23 @@ def _registrar_bloqueio_repetido(cpf_tentado):
     agora = datetime.utcnow()
     expira_em = agora + timedelta(hours=24)
 
-    # Reset o contador se o documento expirou antes de incrementar.
-    doc = colecao_seguranca_login.find_one({'_id': chave_alerta})
-    if doc and doc.get('expira_em', agora) <= agora:
-        colecao_seguranca_login.delete_one({'_id': chave_alerta})
-
+    # Incremento atômico: se o documento expirou (expira_em <= agora), reinicia o
+    # contador em 1 e renova a expiração — tudo numa única operação sem race condition.
     resultado_alerta = colecao_seguranca_login.find_one_and_update(
         {'_id': chave_alerta},
-        {'$inc': {'contagem': 1}, '$set': {'expira_em': expira_em, 'atualizado_em': agora}},
+        [{'$set': {
+            'contagem': {'$cond': {
+                'if': {'$or': [{'$not': ['$expira_em']}, {'$lte': ['$expira_em', agora]}]},
+                'then': 1,
+                'else': {'$add': [{'$ifNull': ['$contagem', 0]}, 1]},
+            }},
+            'expira_em': {'$cond': {
+                'if': {'$or': [{'$not': ['$expira_em']}, {'$lte': ['$expira_em', agora]}]},
+                'then': expira_em,
+                'else': '$expira_em',
+            }},
+            'atualizado_em': agora,
+        }}],
         upsert=True,
         return_document=True,
     )
@@ -350,18 +361,10 @@ def dashboard_publico(request):
         ]}})
         paralisadas = colecao_obras.count_documents({"SITUACAO": {"$in": ["Paralisada", "Cancelada"]}})
 
-        # VALOR_OBRA é salvo como string BR (ex: "1.234,56") — converter em Python
-        def _valor_para_float(v):
-            if not v or v == '—':
-                return 0.0
-            try:
-                return float(str(v).replace('.', '').replace(',', '.'))
-            except (ValueError, TypeError):
-                return 0.0
-
-        # Investimento total — somar em Python pois $sum ignora strings
-        todos_valores = list(colecao_obras.find({}, {"VALOR_OBRA": 1, "_id": 0}))
-        investimento_total = sum(_valor_para_float(d.get("VALOR_OBRA")) for d in todos_valores)
+        # Investimento total — $sum direto pois VALOR_OBRA agora é float no banco
+        pipeline_invest_total = [{"$group": {"_id": None, "total": {"$sum": "$VALOR_OBRA"}}}]
+        invest_total_raw = list(colecao_obras.aggregate(pipeline_invest_total))
+        investimento_total = invest_total_raw[0]["total"] if invest_total_raw else 0.0
 
         # Status das obras (para gráfico de barras por situação)
         pipeline_status = [{"$group": {"_id": "$SITUACAO", "count": {"$sum": 1}}}]
@@ -380,18 +383,16 @@ def dashboard_publico(request):
         anos_labels = [a["_id"] for a in anos_raw]
         anos_counts = [a["count"] for a in anos_raw]
 
-        # Investimento por ano — agrupar em Python (VALOR_OBRA é string BR)
-        docs_invest_ano = list(colecao_obras.find(
-            {"DATA_INICIO": {"$regex": r"^\d{2}/\d{2}/\d{4}$"}},
-            {"DATA_INICIO": 1, "VALOR_OBRA": 1, "_id": 0}
-        ))
-        invest_por_ano = {}
-        for d in docs_invest_ano:
-            ano = d.get("DATA_INICIO", "")[-4:]
-            if ano.isdigit():
-                invest_por_ano[ano] = invest_por_ano.get(ano, 0) + _valor_para_float(d.get("VALOR_OBRA"))
-        invest_anos_labels = sorted(invest_por_ano.keys())
-        invest_anos_values = [round(invest_por_ano[a] / 1_000_000, 4) for a in invest_anos_labels]
+        # Investimento por ano — $sum direto pois VALOR_OBRA é float
+        pipeline_invest_ano = [
+            {"$addFields": {"ano": {"$substr": ["$DATA_INICIO", 6, 4]}}},
+            {"$match": {"ano": {"$regex": "^[0-9]{4}$"}}},
+            {"$group": {"_id": "$ano", "total": {"$sum": "$VALOR_OBRA"}}},
+            {"$sort": {"_id": 1}},
+        ]
+        invest_ano_raw = list(colecao_obras.aggregate(pipeline_invest_ano))
+        invest_anos_labels = [r["_id"] for r in invest_ano_raw]
+        invest_anos_values = [round(r["total"] / 1_000_000, 4) for r in invest_ano_raw]
 
         # Tipo de execução (pizza)
         pipeline_tipo = [{"$group": {"_id": "$TIPO_EXECUCAO", "count": {"$sum": 1}}}]
@@ -523,6 +524,50 @@ def validar_rg(rg):
     estados (diferente de CPF/CNPJ) — aqui só confirmamos que, depois de
     limpo, sobrou algo plausível: só dígitos, com um tamanho razoável."""
     return bool(rg) and rg.isdigit() and 5 <= len(rg) <= 12
+
+
+def _upload_com_retry(foto, pasta="obras_projeto", tentativas=3, espera=3):
+    """Faz upload de um arquivo pro Cloudinary com até `tentativas` retries,
+    esperando `espera` segundos entre cada um. Lança a última exceção se todas falharem."""
+    ultima_exc = None
+    for i in range(tentativas):
+        try:
+            return cloudinary.uploader.upload(foto, folder=pasta)
+        except Exception as exc:
+            ultima_exc = exc
+            if i < tentativas - 1:
+                time.sleep(espera)
+    raise ultima_exc
+
+
+def _valor_br_para_float(valor_str):
+    """Converte string BR ('1.234,56') para float. Retorna 0.0 em caso de falha."""
+    if not valor_str or valor_str == '—':
+        return 0.0
+    try:
+        return float(str(valor_str).replace('.', '').replace(',', '.'))
+    except (ValueError, TypeError):
+        return 0.0
+
+
+def _float_para_br(valor_float):
+    """Converte float para string BR ('1.234,56') para exibição e Google Sheets.
+    Aceita também strings no formato BR como fallback defensivo, para cobrir
+    documentos legados não migrados."""
+    if not valor_float:
+        return '0,00'
+    try:
+        v = float(valor_float)
+    except (ValueError, TypeError):
+        # Fallback: pode ser string BR ("1.234,56") ainda no banco
+        try:
+            v = float(str(valor_float).replace('.', '').replace(',', '.'))
+        except (ValueError, TypeError):
+            return '0,00'
+    try:
+        return f"{v:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+    except (ValueError, TypeError):
+        return '0,00'
 
 
 def valor_e_valido(valor_str):
@@ -668,20 +713,6 @@ def logout_view(request):
         return redirect('login')
     return redirect('/login/?aviso=saiu')
 
-def staff_required(view_func):
-    @wraps(view_func)
-    def _wrapped_view(request, *args, **kwargs):
-        from django.urls import reverse as _reverse
-        if not request.user.is_authenticated:
-            return redirect(f"{_reverse('login')}?next={request.path}")
-        if not (request.user.is_staff or request.user.is_superuser):
-            messages.error(request, "Acesso não autorizado. Esta área é restrita a supervisores.")
-            return redirect('inicio')
-        return view_func(request, *args, **kwargs)
-    return _wrapped_view
-def eh_supervisor(user):
-    return user.is_authenticated and (user.is_staff or user.is_superuser)
-
 def pegar_ano_google():
     # Resultado cacheado por 1h — evita bloquear o thread do request numa chamada UDP
     # ao servidor NTP a cada cadastro de obra. O ano muda uma vez por ano; 1h é mais
@@ -721,11 +752,14 @@ def cadastro_funcionario(request):
         return redirect('cadastro_funcionario')
 
     if request.method == 'POST' and 'btn-salvar' in request.POST:
-        if _form_ja_em_processamento(request, 'cadastro_funcionario'):
-            return _render_cadastro_func("Sua solicitação já está sendo processada. Aguarde alguns segundos.")
+        _eh_retry = request.headers.get('X-Auto-Retry') == 'true'
+        if not _eh_retry and _form_ja_em_processamento(request, 'cadastro_funcionario'):
+            return _render_cadastro_func("Já recebemos uma solicitação recente. Evite enviar mais de uma vez.")
 
-        if _token_ja_usado(request.POST.get('form_token', '')):
+        if not _eh_retry and _token_ja_usado(request.POST.get('form_token', '')):
             return _render_cadastro_func("Este cadastro já foi enviado. Se precisar cadastrar outro funcionário, recarregue a página.")
+        if _eh_retry:
+            _token_ja_usado(request.POST.get('form_token', ''))  # consome o token sem rejeitar
 
         try:
             rg_limpo = request.POST.get('RG', '').replace('.', '').replace('-', '')
@@ -957,15 +991,18 @@ def salva_edicao_funcionario(request):
         }
 
     if request.method == 'POST':
-        if _form_ja_em_processamento(request, 'salva_edicao_funcionario'):
-            messages.warning(request, "Sua solicitação já está sendo processada. Aguarde alguns segundos.")
+        _eh_retry = request.headers.get('X-Auto-Retry') == 'true'
+        if not _eh_retry and _form_ja_em_processamento(request, 'salva_edicao_funcionario'):
+            messages.warning(request, "Já recebemos uma solicitação recente. Evite enviar mais de uma vez.")
             request.session['erro_edicao_funcionario'] = _dados_para_repor(request)
             return redirect('salva_edicao_funcionario')
 
-        if _token_ja_usado(request.POST.get('form_token', '')):
+        if not _eh_retry and _token_ja_usado(request.POST.get('form_token', '')):
             messages.warning(request, "Esta edição já foi enviada. Se precisar editar novamente, refaça a busca.")
             request.session['erro_edicao_funcionario'] = _dados_para_repor(request)
             return redirect('salva_edicao_funcionario')
+        if _eh_retry:
+            _token_ja_usado(request.POST.get('form_token', ''))
 
         cpf_original = request.POST.get('CPF_ORIGINAL', '').strip()
 
@@ -1174,11 +1211,14 @@ def cadastro_obras(request):
             request.session['erro_cadastro_obras'] = request.POST.dict()
             return redirect('Cadastro-Obras')
 
-        if _form_ja_em_processamento(request, 'cadastro_obras'):
-            return _render_cadastro("Sua solicitação já está sendo processada. Aguarde alguns segundos.")
+        _eh_retry = request.headers.get('X-Auto-Retry') == 'true'
+        if not _eh_retry and _form_ja_em_processamento(request, 'cadastro_obras'):
+            return _render_cadastro("Já recebemos uma solicitação recente. Evite enviar mais de uma vez.")
 
-        if _token_ja_usado(request.POST.get('form_token', '')):
+        if not _eh_retry and _token_ja_usado(request.POST.get('form_token', '')):
             return _render_cadastro("Este cadastro já foi enviado. Se precisar cadastrar outra obra, recarregue a página.")
+        if _eh_retry:
+            _token_ja_usado(request.POST.get('form_token', ''))
 
         # Coleta fora do try para que erros de validação nunca sejam engolidos pelo except externo
         id_obra_manual = request.POST.get('ID_OBRA_MANUAL', '').strip()
@@ -1249,10 +1289,8 @@ def cadastro_obras(request):
             if dt_inicio >= dt_finalizacao:
                 return _render_cadastro("A Data de Finalização deve ser posterior à Data de Início.")
 
-        # Só trava contra duplo submit agora — e por mais tempo que os outros
-        # formulários, porque o upload de fotos pro Cloudinary pode demorar
-        # vários segundos em conexão ruim (4s seria curto demais aqui).
-        _marcar_form_em_processamento(request, 'cadastro_obras', segundos=12)
+        # Só trava contra duplo submit agora que a validação passou.
+        _marcar_form_em_processamento(request, 'cadastro_obras', segundos=5)
 
         try:
             # 4. UPLOAD MÚLTIPLO (Cloudinary)
@@ -1261,7 +1299,7 @@ def cadastro_obras(request):
             public_ids_enviados = []
             try:
                 for foto in fotos_arquivos:
-                    resultado_upload = cloudinary.uploader.upload(foto, folder="obras_projeto")
+                    resultado_upload = _upload_com_retry(foto)
                     public_ids_enviados.append(resultado_upload.get('public_id', ''))
                     urls_galeria.append(resultado_upload.get('secure_url'))
             except Exception:
@@ -1304,7 +1342,7 @@ def cadastro_obras(request):
                     'ID_OBRA': id_obra_gerado,
                     'TIPO_OBRA': tipo_obra,      # Ex: PAVIMENTAÇÃO (Maiúsculo)
                     'SITUACAO': situacao,        # Ex: Em andamento (Como na planilha)
-                    'VALOR_OBRA': valor_obra,
+                    'VALOR_OBRA': _valor_br_para_float(valor_obra),
                     'DATA_INICIO': formatar_data_br(data_inicio),
                     'CONCLUSAO_PREVISTA': formatar_data_br(conclusao_prevista),
                     'DATA_FINALIZACAO': formatar_data_br(data_finalizacao) if data_finalizacao else "—",
@@ -1390,6 +1428,8 @@ def busca_atualiza_obra(request):
             obra_encontrada['DATA_INICIO'] = preparar_data_para_input(obra_encontrada.get('DATA_INICIO'))
             obra_encontrada['CONCLUSAO_PREVISTA'] = preparar_data_para_input(obra_encontrada.get('CONCLUSAO_PREVISTA'))
             obra_encontrada['DATA_FINALIZACAO'] = preparar_data_para_input(obra_encontrada.get('DATA_FINALIZACAO'))
+            # VALOR_OBRA é float no banco — converter para string BR para o campo de texto do form
+            obra_encontrada['VALOR_OBRA'] = _float_para_br(obra_encontrada.get('VALOR_OBRA', 0))
 
             # Retorna o template de edição
             contexto = {'obra': obra_encontrada, 'form_token': _gerar_form_token()}
@@ -1421,11 +1461,14 @@ def salva_edicao_obra(request):
             request.session['erro_edicao_obra'] = request.POST.dict()
             return redirect('salva_edicao_obra')
 
-        if _form_ja_em_processamento(request, 'salva_edicao_obra'):
-            return _render_edicao("Sua solicitação já está sendo processada. Aguarde alguns segundos.")
+        _eh_retry = request.headers.get('X-Auto-Retry') == 'true'
+        if not _eh_retry and _form_ja_em_processamento(request, 'salva_edicao_obra'):
+            return _render_edicao("Já recebemos uma solicitação recente. Evite enviar mais de uma vez.")
 
-        if _token_ja_usado(request.POST.get('form_token', '')):
+        if not _eh_retry and _token_ja_usado(request.POST.get('form_token', '')):
             return _render_edicao("Esta edição já foi enviada. Se precisar editar novamente, refaça a busca.")
+        if _eh_retry:
+            _token_ja_usado(request.POST.get('form_token', ''))
 
         # Coleta fora do try para que erros de validação nunca sejam engolidos pelo except externo
         id_obra = request.POST.get('ID_OBRA', '').strip()
@@ -1499,7 +1542,7 @@ def salva_edicao_obra(request):
             return _render_edicao(f"Obra {id_obra} não encontrada. Refaça a busca.")
 
         # Trava contra duplo submit só depois da validação de existência.
-        _marcar_form_em_processamento(request, 'salva_edicao_obra', segundos=12)
+        _marcar_form_em_processamento(request, 'salva_edicao_obra', segundos=5)
 
         erro_foto = False
         resultado_update = None
@@ -1511,7 +1554,7 @@ def salva_edicao_obra(request):
             dados_atualizados = {
                 'TIPO_OBRA': tipo_obra.upper(),
                 'SITUACAO': situacao, # Padronizado
-                'VALOR_OBRA': valor_obra,
+                'VALOR_OBRA': _valor_br_para_float(valor_obra),
                 'DATA_INICIO': formatar_data_br(data_inicio),
                 'CONCLUSAO_PREVISTA': formatar_data_br(conclusao_prevista),
                 'DATA_FINALIZACAO': formatar_data_br(data_finalizacao) if data_finalizacao else "—",
@@ -1535,7 +1578,7 @@ def salva_edicao_obra(request):
                 public_ids_novos = []
                 try:
                     for foto in fotos_novas_arquivos:
-                        resultado_upload = cloudinary.uploader.upload(foto, folder="obras_projeto")
+                        resultado_upload = _upload_com_retry(foto)
                         url_url = resultado_upload.get('secure_url')
                         if not url_url:
                             raise ValueError("Cloudinary não retornou 'secure_url' para o upload.")
@@ -1644,6 +1687,8 @@ def lista_obras(request):
     pagina_num = max(1, pagina_num)
 
     versao_cache = cache.get(CACHE_KEY_VERSAO_OBRAS, 0)
+
+    # Chave provisória — pode ser recalculada se pagina_num for clampeado abaixo.
     chave_cache = f'lista_obras_v{versao_cache}_p{pagina_num}'
     contexto = cache.get(chave_cache)
 
@@ -1651,6 +1696,8 @@ def lista_obras(request):
         total_obras = colecao_obras.count_documents({})
         total_paginas = max(1, -(-total_obras // TAMANHO_PAGINA))
         pagina_num = max(1, min(pagina_num, total_paginas))
+        # Atualiza a chave para o valor real após clamp, garantindo hit em próximo acesso.
+        chave_cache = f'lista_obras_v{versao_cache}_p{pagina_num}'
 
         _CAMPOS_LISTA_OBRAS = {
             'ID_OBRA': 1, 'TIPO_OBRA': 1, 'VALOR_OBRA': 1, 'SITUACAO': 1,
@@ -1664,6 +1711,8 @@ def lista_obras(request):
             .skip((pagina_num - 1) * TAMANHO_PAGINA)
             .limit(TAMANHO_PAGINA)
         )
+        for o in obras:
+            o['VALOR_OBRA'] = _float_para_br(o.get('VALOR_OBRA', 0))
 
         contexto = {
             'obras': obras,
@@ -1735,7 +1784,7 @@ def salvar_no_google_sheets(dados):
     # 4. Prepara a linha na ordem EXATA da imagem da planilha
     linha = [
         dados.get('ID_OBRA'),                   # Coluna A: ID
-        dados.get('VALOR_OBRA'),                # Coluna B: Valor Total (Sem o R$)
+        _float_para_br(dados.get('VALOR_OBRA', 0)),  # Coluna B: Valor Total (Sem o R$)
         dados.get('DATA_INICIO'),               # Coluna C: Data Início
         dados.get('CONCLUSAO_PREVISTA'),        # Coluna D: Conclusão Prevista
         dados.get('DATA_FINALIZACAO'),          # Coluna E: Data Finalização
@@ -1784,7 +1833,7 @@ def atualizar_no_google_sheets(dados):
 
     linha_atualizada = [
         dados.get('ID_OBRA'),
-        dados.get('VALOR_OBRA'),
+        _float_para_br(dados.get('VALOR_OBRA', 0)),
         dados.get('DATA_INICIO'),
         dados.get('CONCLUSAO_PREVISTA'),
         dados.get('DATA_FINALIZACAO'),
@@ -1879,9 +1928,12 @@ def deletar_obra(request):
 
     # Guard de token de idempotência — evita duplo-submit do modal de confirmação
     form_token = request.POST.get('form_token', '').strip()
-    if _token_ja_usado(form_token):
+    _eh_retry = request.headers.get('X-Auto-Retry') == 'true'
+    if not _eh_retry and _token_ja_usado(form_token):
         messages.error(request, "Ação já processada ou token inválido.")
         return redirect('zona_exclusao')
+    if _eh_retry:
+        _token_ja_usado(form_token)
 
     id_obra = request.POST.get('id_obra', '').strip()
     if not id_obra:

@@ -101,6 +101,91 @@ function initBuscaFunc() {
   inputCPF.addEventListener('input', function () { mascaraCPF(this); });
 }
 
+/* ── Alerta flutuante no estilo partial_messages ── */
+function _mostrarAlerta(mensagem, tipo) {
+  tipo = tipo || 'error';
+  var cores = {
+    error:   { bg: '#f8d7da', color: '#721c24', border: '#f5c6cb' },
+    warning: { bg: '#fff3cd', color: '#856404', border: '#ffeeba' },
+    success: { bg: '#d4edda', color: '#155724', border: '#c3e6cb' },
+    info:    { bg: '#d1ecf1', color: '#0c5460', border: '#bee5eb' }
+  };
+  var c = cores[tipo] || cores.error;
+  var container = document.getElementById('container-mensagens');
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'container-mensagens';
+    container.style.cssText = 'position:fixed;top:85px;left:50%;transform:translateX(-50%);z-index:9999;width:100%;max-width:400px;display:flex;flex-direction:column;align-items:center;pointer-events:none;';
+    document.body.appendChild(container);
+  }
+  var div = document.createElement('div');
+  div.style.cssText = [
+    'background:' + c.bg,
+    'color:' + c.color,
+    'border:1px solid ' + c.border,
+    'padding:15px 25px',
+    'border-radius:50px',
+    'font-weight:bold',
+    'box-shadow:0 10px 25px rgba(0,0,0,0.2)',
+    'margin-bottom:10px',
+    'display:flex',
+    'align-items:center',
+    'gap:10px',
+    'pointer-events:auto',
+    'animation:surgirESumir 4s ease-in-out forwards'
+  ].join(';');
+  div.textContent = mensagem;
+  container.appendChild(div);
+  setTimeout(function () { if (div.parentNode) div.parentNode.removeChild(div); }, 4000);
+}
+
+/* ── Auto-retry em falhas de rede / 5xx ── */
+function _configurarRetry(form, evento) {
+  var tentativas = 0;
+  var maxTentativas = 3;
+  var delay = 3000;
+  var indicatorSel = form.getAttribute('hx-indicator');
+
+  function _indicator() {
+    return indicatorSel ? document.querySelector(indicatorSel) : null;
+  }
+
+  form.addEventListener('htmx:configRequest', function (evt) {
+    if (tentativas > 0) evt.detail.headers['X-Auto-Retry'] = 'true';
+  });
+
+  function _agendar() {
+    if (tentativas >= maxTentativas) {
+      tentativas = 0;
+      var el = _indicator();
+      if (el) {
+        var novo = el.cloneNode(false);
+        novo.classList.remove('htmx-request');
+        novo.setAttribute('type', 'button');
+        novo.innerHTML = 'Recarregar Página';
+        novo.style.cssText = 'background:#b91c1c;cursor:pointer;';
+        novo.addEventListener('click', function () { window.location.reload(); }, { once: true });
+        el.parentNode.replaceChild(novo, el);
+      }
+      _mostrarAlerta('Falha na comunicação com o servidor. Recarregue a página e tente novamente.', 'error');
+      return;
+    }
+    tentativas++;
+    setTimeout(function () { htmx.trigger(form, evento); }, delay);
+  }
+
+  form.addEventListener('htmx:sendError',    function () { _agendar(); if (tentativas > 0) { var el = _indicator(); if (el) el.classList.add('htmx-request'); } });
+  form.addEventListener('htmx:responseError', function () { _agendar(); if (tentativas > 0) { var el = _indicator(); if (el) el.classList.add('htmx-request'); } });
+  form.addEventListener('htmx:afterRequest',  function (evt) {
+    if (evt.detail.successful) {
+      tentativas = 0;
+    } else if (tentativas > 0) {
+      var el = _indicator();
+      if (el) el.classList.add('htmx-request');
+    }
+  });
+}
+
 /* ── Cadastro de Obras ── */
 function limparFormObras() {
   var campos = ['idObraManual','tipoObra','situacao','tipoExecucao','valorObra',
@@ -116,6 +201,7 @@ function initCadastroObras() {
   var modal = document.getElementById('modal-confirma-cadastro');
   var form  = document.getElementById('form-cadastro-obras');
   if (!modal || !form) return;
+  _configurarRetry(form, 'confirmar-cadastro');
 
   function abrirModal() { modal.style.display = 'flex'; document.getElementById('modal-confirmar').focus(); }
   function fecharModal() { modal.style.display = 'none'; }
@@ -139,6 +225,7 @@ function initCadastroFunc() {
   var modal = document.getElementById('modal-cadastro-func');
   var form  = document.getElementById('form-cadastro-func');
   if (!modal || !form) return;
+  _configurarRetry(form, 'confirmar-cadastro-func');
 
   function abrirModal() { modal.style.display = 'flex'; document.getElementById('modal-confirmar-func').focus(); }
   function fecharModal() { modal.style.display = 'none'; }
@@ -168,6 +255,7 @@ function initEditaObra() {
   var modal = document.getElementById('modal-edita-obra');
   var form  = document.getElementById('form-edita-obra');
   if (!modal || !form) return;
+  _configurarRetry(form, 'confirmar-edita-obra');
 
   function abrirModal() { modal.style.display = 'flex'; document.getElementById('modal-confirmar-edita-obra').focus(); }
   function fecharModal() { modal.style.display = 'none'; }
@@ -191,6 +279,7 @@ function initEditaFunc() {
   var modal = document.getElementById('modal-edita-func');
   var form  = document.getElementById('form-edita-func');
   if (!modal || !form) return;
+  _configurarRetry(form, 'confirmar-edita-func');
 
   function abrirModal() { modal.style.display = 'flex'; document.getElementById('modal-confirmar-edita-func').focus(); }
   function fecharModal() { modal.style.display = 'none'; }
@@ -213,6 +302,8 @@ function initEditaFunc() {
 function initZonaExclusao() {
   var modal = document.getElementById('modal-exclusao');
   if (!modal) return;
+  var formExclusao = document.getElementById('form-confirmar-exclusao');
+  if (formExclusao) _configurarRetry(formExclusao, 'submit');
 
   var inputId  = document.getElementById('modal-exclusao-input-id');
   var spanId   = document.getElementById('modal-exclusao-id');
@@ -310,8 +401,8 @@ function initDashboard() {
   };
   var CORES_PALETTE = ['#3b7dd8','#16a34a','#d97706','#dc2626','#7c3aed','#0891b2','#d35400','#059669','#7f8c8d','#c0392b'];
 
-  function corPorLabel(label) {
-    return COR_STATUS[label] || CORES_PALETTE[0];
+  function corPorLabel(label, idx) {
+    return COR_STATUS[label] || CORES_PALETTE[idx % CORES_PALETTE.length];
   }
 
   /* Tooltip rico: percentual + valor */

@@ -472,6 +472,13 @@ body {
 
 @keyframes girar { to { transform: rotate(360deg); } }
 
+@keyframes surgirESumir {
+    0%   { opacity: 0; transform: translateY(-50px); }
+    10%  { opacity: 1; transform: translateY(0); }
+    80%  { opacity: 1; transform: translateY(0); }
+    100% { opacity: 0; transform: translateY(-100px); }
+}
+
 .htmx-request .spinner-loading,
 .htmx-request.spinner-loading { display: inline-block; }
 
