@@ -393,6 +393,7 @@ function initDashboard() {
   /* Cores semânticas fixas por significado */
   var COR_STATUS = {
     'Em andamento':                          '#16a34a',
+    'Em licitação':                          '#0891b2',
     'Finalizada por conclusão de construção':'#2563eb',
     'Finalizada por distrato':               '#3b82f6',
     'Paralisada':                            '#d97706',
