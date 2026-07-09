@@ -1934,11 +1934,11 @@ class ExtrairPublicIdCloudinaryTestCase(TestCase):
 
 
 # ==============================================================================
-# ZONA DE EXCLUSÃO — ACESSO E LISTAGEM
+# ZONA ADMINISTRATIVA — ACESSO E LISTAGEM
 # ==============================================================================
 
-class ZonaExclusaoAcessoTestCase(MongoTesteBase):
-    """Testa controle de acesso e renderização da zona_exclusao."""
+class ZonaAdminAcessoTestCase(MongoTesteBase):
+    """Testa controle de acesso e renderização da zona_admin."""
 
     def setUp(self):
         super().setUp()
@@ -1959,33 +1959,38 @@ class ZonaExclusaoAcessoTestCase(MongoTesteBase):
         })
 
     def test_nao_autenticado_redireciona_para_login_com_next(self):
-        resposta = self.client.get("/zona-exclusao/")
+        resposta = self.client.get("/zona-admin/")
         self.assertTrue(resposta.url.startswith("/login/"))
-        self.assertIn("zona-exclusao", resposta.url)
+        self.assertIn("zona-admin", resposta.url)
 
-    def test_funcionario_comum_e_redirecionado_para_inicio(self):
+    def test_funcionario_comum_acessa_aba_obras(self):
         self.client.force_login(self.comum)
-        resposta = self.client.get("/zona-exclusao/")
-        self.assertRedirects(resposta, "/inicio/")
+        resposta = self.client.get("/zona-admin/", HTTP_HX_REQUEST="true")
+        self.assertEqual(resposta.status_code, 200)
+
+    def test_funcionario_comum_nao_acessa_aba_funcionarios(self):
+        self.client.force_login(self.comum)
+        resposta = self.client.get("/zona-admin/?aba=funcionarios", HTTP_HX_REQUEST="true")
+        self.assertRedirects(resposta, "/zona-admin/", fetch_redirect_response=False)
 
     def test_supervisor_acessa_htmx_retorna_200(self):
         self.client.force_login(self.supervisor)
-        resposta = self.client.get("/zona-exclusao/", HTTP_HX_REQUEST="true")
+        resposta = self.client.get("/zona-admin/", HTTP_HX_REQUEST="true")
         self.assertEqual(resposta.status_code, 200)
 
     def test_supervisor_acessa_direto_retorna_200(self):
         self.client.force_login(self.supervisor)
-        resposta = self.client.get("/zona-exclusao/")
+        resposta = self.client.get("/zona-admin/")
         self.assertEqual(resposta.status_code, 200)
 
     def test_obras_aparecem_na_listagem(self):
         self.client.force_login(self.supervisor)
-        resposta = self.client.get("/zona-exclusao/", HTTP_HX_REQUEST="true")
+        resposta = self.client.get("/zona-admin/", HTTP_HX_REQUEST="true")
         self.assertContains(resposta, "12026")
 
-    def test_zona_exclusao_ausente_do_acesso_nao_autenticado(self):
-        """Confirma que a rota entra corretamente na lista de endpoints protegidos."""
-        resposta = self.client.get("/zona-exclusao/")
+    def test_zona_admin_exige_autenticacao(self):
+        """Confirma que a rota exige login."""
+        resposta = self.client.get("/zona-admin/")
         self.assertFalse(self.client.session.get("_auth_user_id"))
 
 
@@ -2079,7 +2084,7 @@ class DeletarObraTestCase(MongoTesteBase):
     def test_resposta_nao_htmx_redireciona_normalmente(self, mock_destroy):
         self.client.force_login(self.supervisor)
         resposta = self.client.post("/deletar-obra/", {"id_obra": self.ID_OBRA_TESTE, "form_token": _gerar_form_token()})
-        self.assertRedirects(resposta, "/zona-exclusao/", fetch_redirect_response=False)
+        self.assertRedirects(resposta, "/zona-admin/", fetch_redirect_response=False)
 
     # ------------------------------------------------------------------
     # Casos de erro
@@ -2108,8 +2113,8 @@ class DeletarObraTestCase(MongoTesteBase):
     # Acesso sem autenticação à zona de exclusão (complementa AcessoNaoAutenticadoTestCase)
     # ------------------------------------------------------------------
 
-    def test_zona_exclusao_get_redireciona_para_login(self):
-        resposta = self.client.get("/zona-exclusao/")
+    def test_zona_admin_get_redireciona_para_login(self):
+        resposta = self.client.get("/zona-admin/")
         self.assertTrue(resposta.url.startswith("/login/"))
 
     def test_token_ausente_e_rejeitado(self):
@@ -2117,7 +2122,7 @@ class DeletarObraTestCase(MongoTesteBase):
         self.client.force_login(self.supervisor)
         resposta = self.client.post("/deletar-obra/", {"id_obra": self.ID_OBRA_TESTE})
         self.assertEqual(self.colecao_obras.count_documents({"ID_OBRA": self.ID_OBRA_TESTE}), 1)
-        self.assertRedirects(resposta, "/zona-exclusao/", fetch_redirect_response=False)
+        self.assertRedirects(resposta, "/zona-admin/", fetch_redirect_response=False)
 
     @patch("obras.views.cloudinary.uploader.destroy")
     def test_audit_log_registra_exclusao(self, mock_destroy):

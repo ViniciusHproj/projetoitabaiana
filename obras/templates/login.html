@@ -77,12 +77,14 @@
 
     {% if request.GET.next %}
       <div class="aviso-next">
-        {% if "cadastro-funcionario" in request.GET.next %}
+        {% if "zona-admin" in request.GET.next %}
+          Realize o login para acessar a <strong>Zona Administrativa</strong>.
+        {% elif "cadastro-funcionario" in request.GET.next %}
           Realize o login para acessar o <strong>Cadastro de Funcionários</strong>.
         {% elif "atualizar-funcionario" in request.GET.next %}
           Realize o login para <strong>Editar Funcionários</strong>.
         {% elif "zona-exclusao" in request.GET.next %}
-          Realize o login para acessar a <strong>Zona de Exclusão</strong>.
+          Realize o login para acessar a <strong>Zona Administrativa</strong>.
         {% elif "obra" in request.GET.next %}
           Realize o login para acessar a área de <strong>Obras</strong>.
         {% else %}

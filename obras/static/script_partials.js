@@ -701,6 +701,103 @@ function initModalGaleria() {
   }
 }
 
+/* ── Zona Administrativa ── */
+function initZonaAdmin() {
+  /* ── Modal de exclusão de obra ── */
+  var modal    = document.getElementById('modal-exclusao');
+  var inputId  = document.getElementById('modal-exclusao-input-id');
+  var spanId   = document.getElementById('modal-exclusao-id');
+  var spanTipo = document.getElementById('modal-exclusao-tipo');
+
+  if (modal) {
+    function fecharModal() { modal.style.display = 'none'; if (inputId) inputId.value = ''; }
+    document.querySelectorAll('.btn-excluir[data-id]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        if (inputId)  inputId.value        = btn.dataset.id;
+        if (spanId)   spanId.textContent   = btn.dataset.id;
+        if (spanTipo) spanTipo.textContent = btn.dataset.tipo !== '—' ? btn.dataset.tipo : '';
+        modal.style.display = 'flex';
+      });
+    });
+    var btnCancObra = document.getElementById('modal-exclusao-cancelar');
+    var bdropObra   = document.getElementById('modal-exclusao-backdrop');
+    if (btnCancObra) btnCancObra.addEventListener('click', fecharModal);
+    if (bdropObra)   bdropObra.addEventListener('click', fecharModal);
+  }
+
+  /* ── Modal de alteração de cargo ── */
+  var modalCargo = document.getElementById('modal-cargo');
+  if (modalCargo) {
+    function fecharCargo() { modalCargo.style.display = 'none'; }
+    document.querySelectorAll('.btn-alterar-cargo').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var cargoNome   = document.getElementById('modal-cargo-nome');
+        var cargoAtual  = document.getElementById('modal-cargo-atual');
+        var cargoCpf    = document.getElementById('modal-cargo-cpf');
+        var cargoSelect = document.getElementById('modal-cargo-select');
+        var cur = btn.dataset.cargoAtual;
+        if (cargoNome)   cargoNome.textContent  = btn.dataset.nome;
+        if (cargoAtual)  cargoAtual.textContent = 'Cargo atual: ' + (cur === 'SUPERVISOR' ? 'Supervisor' : 'Funcionário Comum');
+        if (cargoSelect) cargoSelect.value = cur === 'SUPERVISOR' ? 'COMUM' : 'SUPERVISOR';
+        if (cargoCpf)    cargoCpf.value = btn.dataset.cpf;
+        modalCargo.style.display = 'flex';
+      });
+    });
+    var btnCancCargo = document.getElementById('modal-cargo-cancelar');
+    var bdropCargo   = document.getElementById('modal-cargo-backdrop');
+    if (btnCancCargo) btnCancCargo.addEventListener('click', fecharCargo);
+    if (bdropCargo)   bdropCargo.addEventListener('click', fecharCargo);
+  }
+
+  /* ── Modal de exclusão de funcionário ── */
+  var modalExcFunc = document.getElementById('modal-exclusao-func');
+  if (modalExcFunc) {
+    function fecharExcFunc() { modalExcFunc.style.display = 'none'; }
+    document.querySelectorAll('[data-cpf][data-nome].btn-excluir').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var excNome = document.getElementById('modal-excfunc-nome');
+        var excCpf  = document.getElementById('modal-excfunc-cpf');
+        if (excNome) excNome.textContent = btn.dataset.nome;
+        if (excCpf)  excCpf.value        = btn.dataset.cpf;
+        modalExcFunc.style.display = 'flex';
+      });
+    });
+    var excCanc  = document.getElementById('modal-excfunc-cancelar');
+    var excBdrop = document.getElementById('modal-exclusao-func-backdrop');
+    if (excCanc)  excCanc.addEventListener('click', fecharExcFunc);
+    if (excBdrop) excBdrop.addEventListener('click', fecharExcFunc);
+  }
+
+  /* ── Escape fecha qualquer modal aberto ── */
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Escape') return;
+    [modal, modalCargo, modalExcFunc].forEach(function (m) {
+      if (m && m.style.display === 'flex') m.style.display = 'none';
+    });
+  });
+
+  /* ── Click-to-expand: tooltip flutuante para textos truncados ── */
+  var _tooltip = null;
+  function _fecharTooltip() {
+    if (_tooltip) { _tooltip.remove(); _tooltip = null; }
+  }
+  document.querySelectorAll('.exclusao-marquee').forEach(function (el) {
+    if (el.scrollWidth <= el.clientWidth) return;
+    el.style.cursor = 'pointer';
+    el.addEventListener('click', function (e) {
+      e.stopPropagation();
+      if (_tooltip) { _fecharTooltip(); return; }
+      var rect = el.getBoundingClientRect();
+      _tooltip = document.createElement('div');
+      _tooltip.className = 'exclusao-tooltip';
+      _tooltip.textContent = el.textContent.trim();
+      _tooltip.style.cssText = 'position:fixed;z-index:9000;left:' + rect.left + 'px;top:' + (rect.bottom + 4) + 'px;max-width:' + Math.min(400, window.innerWidth - rect.left - 12) + 'px;';
+      document.body.appendChild(_tooltip);
+    });
+  });
+  document.addEventListener('click', _fecharTooltip);
+}
+
 /* ── Dispatcher ── */
 function initPartial() {
   if (document.getElementById('form-login'))             initLogin();
@@ -710,8 +807,10 @@ function initPartial() {
   if (document.getElementById('form-edita-obra'))        initEditaObra();
   if (document.getElementById('form-edita-func'))        initEditaFunc();
   if (document.getElementById('modal-galeria-overlay'))  initModalGaleria();
-  if (document.getElementById('modal-exclusao'))         initZonaExclusao();
   if (document.getElementById('dashboard-dados'))        initDashboard();
+  if (document.getElementById('modal-exclusao') ||
+      document.getElementById('modal-cargo') ||
+      document.getElementById('modal-exclusao-func'))    initZonaAdmin();
 }
 
 /* ── Link ativo na sidebar ── */

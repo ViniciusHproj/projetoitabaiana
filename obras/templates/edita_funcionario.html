@@ -59,10 +59,16 @@
 
           <div class="field full">
             <label>Função no Sistema</label>
+            {% if request.user.is_superuser %}
             <select name="FUNCAO">
               <option value="COMUM" {% if funcionario.FUNCAO == 'COMUM' %}selected{% endif %}>FUNCIONÁRIO COMUM (Apenas cadastra obras)</option>
-              <option value="SUPERVISOR" {% if funcionario.FUNCAO == 'SUPERVISOR' %}selected{% endif %}>SUPERVISOR (Pode cadastrar outros)</option>
+              <option value="SUPERVISOR" {% if funcionario.FUNCAO == 'SUPERVISOR' %}selected{% endif %}>SUPERVISOR (Pode gerenciar funcionários)</option>
             </select>
+            {% else %}
+            <select name="FUNCAO">
+              <option value="COMUM" selected>FUNCIONÁRIO COMUM (Apenas cadastra obras)</option>
+            </select>
+            {% endif %}
           </div>
 
           <div class="field full">

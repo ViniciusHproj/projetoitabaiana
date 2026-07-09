@@ -14,6 +14,9 @@ CLAUDE.md
 .idea/
 *.code-workspace
 
+# Scripts utilitários locais (dados sensíveis — não versionar)
+scripts/
+
 # Sistema operacional
 .DS_Store
 Thumbs.db

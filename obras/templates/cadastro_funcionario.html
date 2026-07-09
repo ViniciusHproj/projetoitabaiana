@@ -57,10 +57,16 @@
 
             <div class="field full">
               <label>Função no Sistema</label>
+              {% if cargo == 'GERENTE_GERAL' %}
               <select name="NIVEL_ACESSO">
                 <option value="COMUM" {% if dados.NIVEL_ACESSO == 'COMUM' %}selected{% endif %}>FUNCIONÁRIO COMUM (Apenas cadastra obras)</option>
-                <option value="SUPERVISOR" {% if dados.NIVEL_ACESSO == 'SUPERVISOR' %}selected{% endif %}>SUPERVISOR (Pode cadastrar outros)</option>
+                <option value="SUPERVISOR" {% if dados.NIVEL_ACESSO == 'SUPERVISOR' %}selected{% endif %}>SUPERVISOR (Pode gerenciar funcionários)</option>
               </select>
+              {% else %}
+              <select name="NIVEL_ACESSO">
+                <option value="COMUM" selected>FUNCIONÁRIO COMUM (Apenas cadastra obras)</option>
+              </select>
+              {% endif %}
             </div>
 
             <div class="field full">

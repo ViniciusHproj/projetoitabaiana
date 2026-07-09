@@ -14,8 +14,7 @@ import ntplib
 import uuid
 from datetime import datetime, timedelta
 from django.contrib.auth.models import User
-from django.contrib.auth.password_validation import validate_password
-from django.core.exceptions import ValidationError as DjangoValidationError
+
 import cloudinary.uploader
 from django.contrib.auth import authenticate, login as auth_login
 from django.contrib.auth import logout as auth_logout
@@ -174,6 +173,15 @@ def _validar_foto(foto):
                 continue
             return None
     return f'O arquivo "{foto.name}" não é uma imagem válida.'
+
+
+def _cargo_usuario(user):
+    """Retorna 'GERENTE_GERAL', 'SUPERVISOR' ou 'COMUM' para um usuário autenticado."""
+    if user.is_superuser:
+        return 'GERENTE_GERAL'
+    if user.is_staff:
+        return 'SUPERVISOR'
+    return 'COMUM'
 
 
 def _ip_do_cliente(request):
@@ -662,7 +670,12 @@ def login_view(request):
 
             partes_nome = (user.first_name or "").split()
             nome_usuario = partes_nome[0].title() if partes_nome else user.username
-            funcao = "Supervisor" if user.is_staff else "Funcionário Comum"
+            if user.is_superuser:
+                funcao = "Gerente Geral"
+            elif user.is_staff:
+                funcao = "Supervisor"
+            else:
+                funcao = "Funcionário Comum"
 
             proxima_raw = request.GET.get('next', '')
             if proxima_raw and url_has_allowed_host_and_scheme(
@@ -805,8 +818,11 @@ def cadastro_funcionario(request):
             # Validação do nível de acesso — deve ser um dos dois valores aceitos.
             # Sem isso, um valor arbitrário como "GERENTE" passaria pela validação,
             # seria salvo como FUNCAO no MongoDB e o usuário ficaria como COMUM no Django.
-            NIVEIS_VALIDOS = {'SUPERVISOR', 'COMUM'}
+            cargo_editor = _cargo_usuario(request.user)
+            NIVEIS_VALIDOS = {'SUPERVISOR', 'COMUM'} if cargo_editor == 'GERENTE_GERAL' else {'COMUM'}
             if _nivel not in NIVEIS_VALIDOS:
+                if cargo_editor == 'SUPERVISOR':
+                    return _render_cadastro_func("Supervisores só podem cadastrar funcionários comuns.")
                 return _render_cadastro_func("O nível de acesso selecionado é inválido.")
             # ==========================================
 
@@ -828,16 +844,10 @@ def cadastro_funcionario(request):
             # ==========================================
 
             # ==========================================
-            # 2.8 TRAVA DE SEGURANÇA DA SENHA (AUTH_PASSWORD_VALIDATORS)
+            # 2.8 VALIDAÇÃO MÍNIMA DE SENHA
             # ==========================================
-            # create_user() NÃO aplica AUTH_PASSWORD_VALIDATORS sozinho — isso só
-            # acontece em formulários prontos do Django. Sem chamar validate_password
-            # explicitamente aqui, a política de senha configurada em settings.py
-            # nunca seria realmente aplicada.
-            try:
-                validate_password(documento_funcionario['SENHA'])
-            except DjangoValidationError as erro:
-                return _render_cadastro_func(" ".join(erro.messages))
+            if len(documento_funcionario['SENHA']) < 8:
+                return _render_cadastro_func("A senha deve ter pelo menos 8 caracteres.")
             # ==========================================
 
             # 3. VERIFICAÇÃO DE DUPLICIDADE (Evita crash no Django)
@@ -892,7 +902,7 @@ def cadastro_funcionario(request):
             logger.exception("Erro ao cadastrar funcionário")
             return _render_cadastro_func("Erro inesperado ao cadastrar. Tente novamente.", nivel='error')
 
-    contexto_token = {'form_token': _gerar_form_token()}
+    contexto_token = {'form_token': _gerar_form_token(), 'cargo': _cargo_usuario(request.user)}
     dados_repostos = request.session.pop('erro_cadastro_funcionario', None)
     if dados_repostos:
         contexto_token['dados'] = dados_repostos
@@ -1014,6 +1024,17 @@ def salva_edicao_funcionario(request):
             messages.error(request, "Sessão de edição inválida. Refaça a busca do funcionário.")
             return redirect('busca_atualiza_funcionario')
 
+        # Supervisor não pode editar outro supervisor ou gerente geral.
+        cargo_editor = _cargo_usuario(request.user)
+        if cargo_editor == 'SUPERVISOR':
+            try:
+                usuario_alvo_check = User.objects.get(username=cpf_autorizado)
+                if usuario_alvo_check.is_staff or usuario_alvo_check.is_superuser:
+                    messages.error(request, "Supervisores não podem editar outros supervisores ou o Gerente Geral.")
+                    return redirect('zona_admin')
+            except User.DoesNotExist:
+                pass
+
         # 1. COLETA E LIMPEZA INICIAL DOS DADOS
         nome_novo = request.POST.get('NOME', '').strip()
         funcao_nova = request.POST.get('FUNCAO', '').strip()
@@ -1070,27 +1091,22 @@ def salva_edicao_funcionario(request):
         # ==========================================
         # 2.7 TRAVA DE SEGURANÇA DA FUNÇÃO
         # ==========================================
-        FUNCOES_VALIDAS = {'SUPERVISOR', 'COMUM'}
+        FUNCOES_VALIDAS = {'SUPERVISOR', 'COMUM'} if _cargo_usuario(request.user) == 'GERENTE_GERAL' else {'COMUM'}
         if funcao_nova.upper() not in FUNCOES_VALIDAS:
-            messages.warning(request, "A função selecionada é inválida.")
+            messages.warning(request, "A função selecionada é inválida ou não permitida para o seu cargo.")
             request.session['erro_edicao_funcionario'] = _dados_para_repor(request)
             return redirect('salva_edicao_funcionario')
         funcao_nova = funcao_nova.upper()
         # ==========================================
 
         # ==========================================
-        # 2.8 TRAVA DE SEGURANÇA DA SENHA (AUTH_PASSWORD_VALIDATORS)
+        # 2.8 VALIDAÇÃO MÍNIMA DE SENHA
         # ==========================================
-        # set_password() NÃO aplica AUTH_PASSWORD_VALIDATORS sozinho — só valida
-        # se uma nova senha foi de fato digitada (campo vazio = manter a atual).
         nova_senha_digitada = request.POST.get('SENHA', '')
-        if nova_senha_digitada.strip():
-            try:
-                validate_password(nova_senha_digitada)
-            except DjangoValidationError as erro:
-                messages.warning(request, " ".join(erro.messages))
-                request.session['erro_edicao_funcionario'] = _dados_para_repor(request)
-                return redirect('salva_edicao_funcionario')
+        if nova_senha_digitada.strip() and len(nova_senha_digitada.strip()) < 8:
+            messages.warning(request, "A senha deve ter pelo menos 8 caracteres.")
+            request.session['erro_edicao_funcionario'] = _dados_para_repor(request)
+            return redirect('salva_edicao_funcionario')
         # ==========================================
 
         # Só trava contra duplo submit agora que passamos por todas as validações.
@@ -1878,42 +1894,188 @@ def _extrair_public_id_cloudinary(url):
         return None
 
 
-_OBRAS_POR_PAGINA_EXCLUSAO = 6
-
-
-def zona_exclusao(request):
+def alterar_cargo_funcionario(request):
     if not request.user.is_authenticated:
         return redirect(f'/login/?next={request.path}')
-    if not (request.user.is_staff or request.user.is_superuser):
+    if not request.user.is_superuser:
+        messages.error(request, "Acesso restrito ao Gerente Geral.")
+        return redirect('zona_admin')
+    if request.method != 'POST':
+        from django.http import HttpResponseNotAllowed
+        return HttpResponseNotAllowed(['POST'])
+
+    form_token = request.POST.get('form_token', '').strip()
+    if _token_ja_usado(form_token):
+        messages.error(request, "Ação já processada ou token inválido.")
+        return redirect('zona_admin')
+
+    cpf = request.POST.get('cpf', '').strip()
+    novo_cargo = request.POST.get('novo_cargo', '').strip().upper()
+
+    if novo_cargo not in ('COMUM', 'SUPERVISOR'):
+        messages.error(request, "Cargo inválido.")
+        return redirect('zona_admin')
+
+    if cpf == request.user.username:
+        messages.error(request, "Não é possível alterar o próprio cargo.")
+        return redirect('zona_admin')
+
+    try:
+        usuario_alvo = User.objects.get(username=cpf)
+    except User.DoesNotExist:
+        messages.error(request, "Usuário não encontrado.")
+        return redirect('zona_admin')
+
+    if usuario_alvo.is_superuser:
+        messages.error(request, "Não é possível alterar o cargo de outro Gerente Geral.")
+        return redirect('zona_admin')
+
+    novo_is_staff = (novo_cargo == 'SUPERVISOR')
+    is_staff_original = usuario_alvo.is_staff
+    usuario_alvo.is_staff = novo_is_staff
+    usuario_alvo.save(update_fields=['is_staff'])
+
+    try:
+        colecao_funcionarios.update_one({'CPF': cpf}, {'$set': {'FUNCAO': novo_cargo}})
+    except Exception:
+        try:
+            usuario_alvo.is_staff = is_staff_original
+            usuario_alvo.save(update_fields=['is_staff'])
+        except Exception:
+            logger.exception("CRÍTICO: falha ao reverter is_staff após erro MongoDB — CPF=%s", cpf)
+        logger.exception("Erro ao alterar cargo do funcionário CPF=%s", cpf)
+        messages.error(request, "Erro ao alterar cargo. Tente novamente.")
+        return redirect('zona_admin')
+
+    nome_func = usuario_alvo.first_name or cpf
+    cargo_label = 'Supervisor' if novo_cargo == 'SUPERVISOR' else 'Funcionário Comum'
+    messages.success(request, f"Cargo de {nome_func} alterado para {cargo_label}.")
+
+    from django.http import HttpResponse as _HttpResponse
+    if request.headers.get('HX-Request'):
+        resp = _HttpResponse(status=204)
+        resp['HX-Redirect'] = reverse('zona_admin') + '?aba=funcionarios'
+        return resp
+    return redirect(reverse('zona_admin') + '?aba=funcionarios')
+
+
+def deletar_funcionario(request):
+    if not request.user.is_authenticated:
+        return redirect(f'/login/?next={request.path}')
+    if not request.user.is_superuser:
+        messages.error(request, "Acesso restrito ao Gerente Geral.")
+        return redirect('zona_admin')
+    if request.method != 'POST':
+        from django.http import HttpResponseNotAllowed
+        return HttpResponseNotAllowed(['POST'])
+
+    form_token = request.POST.get('form_token', '').strip()
+    if _token_ja_usado(form_token):
+        messages.error(request, "Ação já processada ou token inválido.")
+        return redirect(reverse('zona_admin') + '?aba=funcionarios')
+
+    cpf = request.POST.get('cpf', '').strip()
+    if not cpf:
+        messages.error(request, "CPF inválido.")
+        return redirect(reverse('zona_admin') + '?aba=funcionarios')
+
+    if cpf == request.user.username:
+        messages.error(request, "Não é possível excluir a própria conta.")
+        return redirect(reverse('zona_admin') + '?aba=funcionarios')
+
+    try:
+        usuario_alvo = User.objects.get(username=cpf)
+    except User.DoesNotExist:
+        messages.error(request, "Usuário não encontrado.")
+        return redirect(reverse('zona_admin') + '?aba=funcionarios')
+
+    if usuario_alvo.is_superuser:
+        messages.error(request, "Não é possível excluir outro Gerente Geral.")
+        return redirect(reverse('zona_admin') + '?aba=funcionarios')
+
+    nome = usuario_alvo.first_name or cpf
+
+    try:
+        colecao_funcionarios.delete_one({'CPF': cpf})
+    except Exception:
+        logger.exception("Erro ao deletar funcionário do MongoDB CPF=%s", cpf)
+        messages.error(request, "Erro ao remover dados do funcionário. Tente novamente.")
+        return redirect(reverse('zona_admin') + '?aba=funcionarios')
+
+    usuario_alvo.delete()
+
+    logger.warning(
+        "Funcionário %s (CPF=%s) excluído por %s (IP: %s)",
+        nome, cpf, request.user.username, _ip_do_cliente(request)
+    )
+    messages.success(request, f"Funcionário {nome} excluído com sucesso.")
+
+    from django.http import HttpResponse as _HttpResponse
+    if request.headers.get('HX-Request'):
+        resp = _HttpResponse(status=204)
+        resp['HX-Redirect'] = reverse('zona_admin') + '?aba=funcionarios'
+        return resp
+    return redirect(reverse('zona_admin') + '?aba=funcionarios')
+
+
+_OBRAS_POR_PAGINA_ADMIN = 10
+
+
+def zona_admin(request):
+    if not request.user.is_authenticated:
+        return redirect(f'/login/?next={request.path}')
+
+    cargo = _cargo_usuario(request.user)
+    aba = request.GET.get('aba', 'obras')
+
+    # Aba funcionários: restrita a supervisor e gerente geral
+    if aba == 'funcionarios' and cargo == 'COMUM':
         messages.error(request, "Acesso restrito a supervisores.")
-        return redirect('inicio')
+        return redirect('zona_admin')
 
     try:
         pagina = max(1, int(request.GET.get('pagina', 1)))
     except (ValueError, TypeError):
         pagina = 1
 
-    total = colecao_obras.count_documents({})
-    total_paginas = max(1, (total + _OBRAS_POR_PAGINA_EXCLUSAO - 1) // _OBRAS_POR_PAGINA_EXCLUSAO)
-    pagina = min(pagina, total_paginas)
-    skip = (pagina - 1) * _OBRAS_POR_PAGINA_EXCLUSAO
+    ctx = {'aba': aba, 'cargo': cargo, 'form_token': _gerar_form_token()}
 
-    obras = list(colecao_obras.find(
-        {},
-        {'ID_OBRA': 1, 'TIPO_OBRA': 1, 'SITUACAO': 1, 'ENDERECO': 1, 'DATA_CADASTRO': 1, 'GALERIA': 1, '_id': 0}
-    ).sort('TIMESTAMP_CADASTRO', -1).skip(skip).limit(_OBRAS_POR_PAGINA_EXCLUSAO))
+    if aba == 'obras':
+        total = colecao_obras.count_documents({})
+        total_paginas = max(1, (total + _OBRAS_POR_PAGINA_ADMIN - 1) // _OBRAS_POR_PAGINA_ADMIN)
+        pagina = min(pagina, total_paginas)
+        skip = (pagina - 1) * _OBRAS_POR_PAGINA_ADMIN
 
-    ctx = {
-        'obras': obras,
-        'pagina': pagina,
-        'total_paginas': total_paginas,
-        'total': total,
-        'form_token': _gerar_form_token(),
-    }
+        obras = list(colecao_obras.find(
+            {},
+            {'ID_OBRA': 1, 'TIPO_OBRA': 1, 'SITUACAO': 1, 'ENDERECO': 1, 'DATA_CADASTRO': 1, 'GALERIA': 1, '_id': 0}
+        ).sort('TIMESTAMP_CADASTRO', -1).skip(skip).limit(_OBRAS_POR_PAGINA_ADMIN))
+
+        ctx.update({'obras': obras, 'pagina': pagina, 'total_paginas': total_paginas, 'total': total})
+
+    elif aba == 'funcionarios':
+        funcionarios = list(colecao_funcionarios.find(
+            {},
+            {'NOME': 1, 'CPF': 1, 'FUNCAO': 1, 'DATA_CADASTRO': 1, '_id': 0}
+        ).sort('DATA_CADASTRO', -1))
+
+        # Enriquece com is_staff/is_superuser do Django para exibir cargo real
+        cpfs = [f.get('CPF') for f in funcionarios if f.get('CPF')]
+        django_users = {u.username: u for u in User.objects.filter(username__in=cpfs)}
+        for func in funcionarios:
+            u = django_users.get(func.get('CPF'))
+            if u and u.is_superuser:
+                func['cargo_func'] = 'GERENTE_GERAL'
+            elif u and u.is_staff:
+                func['cargo_func'] = 'SUPERVISOR'
+            else:
+                func['cargo_func'] = 'COMUM'
+
+        ctx['funcionarios'] = funcionarios
 
     if request.headers.get('HX-Request'):
-        return render(request, 'zona_exclusao.html', ctx)
-    return render(request, 'index.html', {'template_meio': 'zona_exclusao.html', **ctx})
+        return render(request, 'zona_admin.html', ctx)
+    return render(request, 'index.html', {'template_meio': 'zona_admin.html', **ctx})
 
 
 def deletar_obra(request):
@@ -1931,19 +2093,19 @@ def deletar_obra(request):
     _eh_retry = request.headers.get('X-Auto-Retry') == 'true'
     if not _eh_retry and _token_ja_usado(form_token):
         messages.error(request, "Ação já processada ou token inválido.")
-        return redirect('zona_exclusao')
+        return redirect('zona_admin')
     if _eh_retry:
         _token_ja_usado(form_token)
 
     id_obra = request.POST.get('id_obra', '').strip()
     if not id_obra:
         messages.error(request, "ID de obra inválido.")
-        return redirect('zona_exclusao')
+        return redirect('zona_admin')
 
     obra = colecao_obras.find_one({'ID_OBRA': id_obra})
     if not obra:
         messages.error(request, f"Obra {id_obra} não encontrada.")
-        return redirect('zona_exclusao')
+        return redirect('zona_admin')
 
     # 1. Deletar fotos do Cloudinary (melhor esforço — falha não impede exclusão)
     galeria = obra.get('GALERIA') or []
@@ -1977,6 +2139,6 @@ def deletar_obra(request):
     from django.http import HttpResponse
     if request.headers.get('HX-Request'):
         response = HttpResponse(status=204)
-        response['HX-Redirect'] = reverse('zona_exclusao')
+        response['HX-Redirect'] = reverse('zona_admin')
         return response
-    return redirect('zona_exclusao')
+    return redirect('zona_admin')
