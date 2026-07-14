@@ -39,10 +39,10 @@ class CSPNonceMiddleware:
             "object-src 'none'; "
             "form-action 'self'; "
             "base-uri 'self'; "
-            "upgrade-insecure-requests;"
+            + ("upgrade-insecure-requests;" if not settings.DEBUG else "")
         )
         response['Content-Security-Policy'] = csp
-        response['Referrer-Policy'] = 'no-referrer'
+        response['Referrer-Policy'] = 'same-origin'
         response['Permissions-Policy'] = 'camera=(), microphone=(), geolocation=()'
         return response
 

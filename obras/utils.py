@@ -30,8 +30,7 @@ def preparar_data_para_input(data_br):
     if not data_br or data_br == '—':
         return ""
     try:
-        dia, mes, ano = data_br.split('/')
-        return f"{ano}-{mes}-{dia}"
+        return datetime.strptime(data_br, "%d/%m/%Y").strftime("%Y-%m-%d")
     except Exception:
         logger.warning("preparar_data_para_input: formato inesperado no Mongo — %r", data_br)
         return ""
