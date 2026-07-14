@@ -1,5 +1,4 @@
 import os
-import json
 import logging
 import re
 import threading
@@ -386,97 +385,6 @@ def _token_ja_usado(token):
     # cache.add é atômico: retorna False se a chave já existe, True se inseriu.
     # Evita race condition de dois POSTs simultâneos passando pelo get+set separado.
     return not cache.add(chave, True, 300)
-
-def dashboard_publico(request):
-    try:
-        # Cards de topo
-        total = colecao_obras.count_documents({})
-        em_execucao = colecao_obras.count_documents({"SITUACAO": "Em andamento"})
-        finalizadas = colecao_obras.count_documents({"SITUACAO": {"$in": [
-            "Finalizada por conclusão de construção", "Finalizada por distrato"
-        ]}})
-        paralisadas = colecao_obras.count_documents({"SITUACAO": {"$in": ["Paralisada", "Cancelada"]}})
-
-        # Investimento total — $toDouble para tolerar documentos legados com VALOR_OBRA como string
-        pipeline_invest_total = [{"$group": {"_id": None, "total": {"$sum": {"$toDouble": {"$ifNull": ["$VALOR_OBRA", 0]}}}}}]
-        invest_total_raw = list(colecao_obras.aggregate(pipeline_invest_total))
-        investimento_total = invest_total_raw[0]["total"] if invest_total_raw else 0.0
-
-        # Status das obras (para gráfico de barras por situação)
-        pipeline_status = [{"$group": {"_id": "$SITUACAO", "count": {"$sum": 1}}}]
-        status_raw = list(colecao_obras.aggregate(pipeline_status))
-        status_labels = [s["_id"] or "Não informado" for s in status_raw]
-        status_counts = [s["count"] for s in status_raw]
-
-        # Total de obras por ano (DATA_INICIO, formato DD/MM/AAAA)
-        pipeline_ano = [
-            {"$addFields": {"ano": {"$substr": ["$DATA_INICIO", 6, 4]}}},
-            {"$match": {"ano": {"$regex": "^[0-9]{4}$"}}},
-            {"$group": {"_id": "$ano", "count": {"$sum": 1}}},
-            {"$sort": {"_id": 1}},
-        ]
-        anos_raw = list(colecao_obras.aggregate(pipeline_ano))
-        anos_labels = [a["_id"] for a in anos_raw]
-        anos_counts = [a["count"] for a in anos_raw]
-
-        # Investimento por ano — $toDouble para tolerar docs legados com VALOR_OBRA string
-        pipeline_invest_ano = [
-            {"$addFields": {"ano": {"$substr": ["$DATA_INICIO", 6, 4]}}},
-            {"$match": {"ano": {"$regex": "^[0-9]{4}$"}}},
-            {"$group": {"_id": "$ano", "total": {"$sum": {"$toDouble": {"$ifNull": ["$VALOR_OBRA", 0]}}}}},
-            {"$sort": {"_id": 1}},
-        ]
-        invest_ano_raw = list(colecao_obras.aggregate(pipeline_invest_ano))
-        invest_anos_labels = [r["_id"] for r in invest_ano_raw]
-        invest_anos_values = [round(r["total"] / 1_000_000, 4) for r in invest_ano_raw]
-
-        # Tipo de execução (pizza)
-        pipeline_tipo = [{"$group": {"_id": "$TIPO_EXECUCAO", "count": {"$sum": 1}}}]
-        tipo_raw = list(colecao_obras.aggregate(pipeline_tipo))
-        tipo_labels = [t["_id"] or "Não informado" for t in tipo_raw]
-        tipo_counts = [t["count"] for t in tipo_raw]
-
-        # Top 5 empresas
-        pipeline_emp = [
-            {"$match": {"EMPRESA_CONTRATADA": {"$nin": [None, "", "—"]}}},
-            {"$group": {"_id": "$EMPRESA_CONTRATADA", "count": {"$sum": 1}}},
-            {"$sort": {"count": -1}},
-            {"$limit": 5},
-        ]
-        empresas_raw = list(colecao_obras.aggregate(pipeline_emp))
-        empresas = [{"nome": e["_id"], "count": e["count"]} for e in empresas_raw]
-
-        ctx = {
-            "total": total,
-            "em_execucao": em_execucao,
-            "finalizadas": finalizadas,
-            "paralisadas": paralisadas,
-            "investimento_total": investimento_total,
-            "status_labels": json.dumps(status_labels),
-            "status_counts": json.dumps(status_counts),
-            "anos_labels": json.dumps(anos_labels),
-            "anos_counts": json.dumps(anos_counts),
-            "invest_anos_labels": json.dumps(invest_anos_labels),
-            "invest_anos_values": json.dumps(invest_anos_values),
-            "tipo_labels": json.dumps(tipo_labels),
-            "tipo_counts": json.dumps(tipo_counts),
-            "empresas": empresas,
-        }
-    except Exception:
-        logger.exception("Erro ao carregar dados do dashboard público")
-        ctx = {
-            "total": "—", "em_execucao": "—", "finalizadas": "—", "paralisadas": "—",
-            "investimento_total": 0,
-            "status_labels": json.dumps([]), "status_counts": json.dumps([]),
-            "anos_labels": json.dumps([]), "anos_counts": json.dumps([]),
-            "invest_anos_labels": json.dumps([]), "invest_anos_values": json.dumps([]),
-            "tipo_labels": json.dumps([]), "tipo_counts": json.dumps([]),
-            "empresas": [],
-        }
-
-    if request.headers.get('HX-Request'):
-        return render(request, 'dashboard_obras.html', ctx)
-    return render(request, 'index.html', {**ctx, 'template_meio': 'dashboard_obras.html'})
 
 
 def pagina_inicial(request):
