@@ -677,7 +677,10 @@ class CadastroFuncionarioValidacaoTestCase(MongoTesteBase):
     def test_funcionario_comum_com_16_anos_e_aceito(self):
         from datetime import date
         hoje = date.today()
-        dezesseis = date(hoje.year - 16, hoje.month, hoje.day).strftime("%Y-%m-%d")
+        try:
+            dezesseis = hoje.replace(year=hoje.year - 16).strftime("%Y-%m-%d")
+        except ValueError:
+            dezesseis = hoje.replace(year=hoje.year - 16, day=28).strftime("%Y-%m-%d")
         self._postar(NIVEL_ACESSO="COMUM", DATA_NASCIMENTO=dezesseis)
         self.assertTrue(self._funcionario_criado())
 

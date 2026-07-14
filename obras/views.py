@@ -107,10 +107,18 @@ except Exception:
     logger.exception("Não foi possível garantir o índice em TIMESTAMP_CADASTRO")
 
 try:
-    # Acelera a busca/edição de funcionário por CPF.
-    colecao_funcionarios.create_index('CPF')
+    # Índice único em CPF — garante que colecao_funcionarios nunca tenha dois
+    # documentos com o mesmo CPF (a proteção via Django User.username já existe,
+    # mas esta camada no Mongo fecha a janela de corrida entre requests simultâneos).
+    # drop_index primeiro para migrar o índice não-único legado; se não existir, o
+    # except é silenciado.
+    try:
+        colecao_funcionarios.drop_index([('CPF', 1)])
+    except Exception:
+        pass
+    colecao_funcionarios.create_index('CPF', unique=True)
 except Exception:
-    logger.exception("Não foi possível garantir o índice em CPF")
+    logger.exception("Não foi possível garantir o índice único em CPF")
 
 try:
     # Acelera a ordenação por mais recente na zona admin (sort por DATA_CADASTRO).
@@ -715,92 +723,91 @@ def cadastro_funcionario(request):
         if _token_ja_usado(request.POST.get('form_token', '')):
             return _render_cadastro_func("Este cadastro já foi enviado. Se precisar cadastrar outro funcionário, recarregue a página.")  # consome o token sem rejeitar
 
+        rg_limpo = request.POST.get('RG', '').replace('.', '').replace('-', '')
+        cpf_limpo = request.POST.get('CPF', '').replace('.', '').replace('-', '')
+
+        # 1. COLETA OS DADOS CRUS E PROTEGIDOS
+        documento_funcionario = {
+            'NOME': request.POST.get('NOME', '').upper(),
+            'DATA_NASCIMENTO': request.POST.get('DATA_NASCIMENTO', ''),
+            'RG': rg_limpo,
+            'CPF': cpf_limpo,
+            'SENHA': request.POST.get('SENHA', ''),
+            'NIVEL_ACESSO': request.POST.get('NIVEL_ACESSO', '').upper()
+        }
+
+        # 2. VALIDAÇÃO EXPLÍCITA (Campos Vazios)
+        campos_obrigatorios = ['NOME', 'DATA_NASCIMENTO', 'RG', 'CPF', 'SENHA', 'NIVEL_ACESSO']
+
+        for campo in campos_obrigatorios:
+            valor = documento_funcionario.get(campo, '')
+            if not valor or str(valor).strip() == "" or valor == '—':
+                return _render_cadastro_func("Preencha todos os campos obrigatórios.")
+
+        # ==========================================
+        # 2.5 TRAVA DE SEGURANÇA DA DATA DE NASCIMENTO
+        # ==========================================
+        data_nasc_str = documento_funcionario['DATA_NASCIMENTO']
+
+        if not data_e_valida(data_nasc_str, tipo="nascimento"):
+            return _render_cadastro_func("A data de nascimento informada é inválida ou irreal.")
+
+        # Verifica idade mínima: 18 anos para Supervisor, 16 para Comum.
+        _nasc = datetime.strptime(data_nasc_str, '%Y-%m-%d').date()
+        _hoje = datetime.today().date()
+        _idade = _hoje.year - _nasc.year - ((_hoje.month, _hoje.day) < (_nasc.month, _nasc.day))
+        _nivel = documento_funcionario.get('NIVEL_ACESSO', '')
+        if _nivel == 'SUPERVISOR' and _idade < 18:
+            return _render_cadastro_func("Supervisores devem ter no mínimo 18 anos.")
+        if _nivel == 'COMUM' and _idade < 16:
+            return _render_cadastro_func("Funcionários devem ter no mínimo 16 anos.")
+
+        # Validação do nível de acesso — deve ser um dos dois valores aceitos.
+        # Sem isso, um valor arbitrário como "GERENTE" passaria pela validação,
+        # seria salvo como FUNCAO no MongoDB e o usuário ficaria como COMUM no Django.
+        cargo_editor = _cargo_usuario(request.user)
+        NIVEIS_VALIDOS = {'SUPERVISOR', 'COMUM'} if cargo_editor == 'GERENTE_GERAL' else {'COMUM'}
+        if _nivel not in NIVEIS_VALIDOS:
+            if cargo_editor == 'SUPERVISOR':
+                return _render_cadastro_func("Supervisores só podem cadastrar funcionários comuns.")
+            return _render_cadastro_func("O nível de acesso selecionado é inválido.")
+        # ==========================================
+
+        # ==========================================
+        # 2.6 TRAVA DE SEGURANÇA DO CPF (dígito verificador)
+        # ==========================================
+        if not validar_cpf(documento_funcionario['CPF']):
+            return _render_cadastro_func("O CPF informado é inválido.")
+        # ==========================================
+
+        # ==========================================
+        # 2.7 TRAVA DE SEGURANÇA DO RG E DO NOME
+        # ==========================================
+        if not validar_rg(documento_funcionario['RG']):
+            return _render_cadastro_func("O RG informado é inválido (deve conter apenas números).")
+
+        if not texto_tem_letra(documento_funcionario['NOME']):
+            return _render_cadastro_func("O Nome informado é inválido.")
+        # ==========================================
+
+        # ==========================================
+        # 2.8 VALIDAÇÃO DE SENHA
+        # ==========================================
+        senha_raw = documento_funcionario['SENHA']
+        if len(senha_raw) < 8:
+            return _render_cadastro_func("A senha deve ter pelo menos 8 caracteres.")
+        # ==========================================
+
+        # 3. VERIFICAÇÃO DE DUPLICIDADE (Evita crash no Django)
+        cpf = documento_funcionario['CPF']
+        if User.objects.filter(username=cpf).exists():
+            return _render_cadastro_func('Já existe um funcionário cadastrado com este CPF.', nivel='error')
+
+        # Só trava contra duplo submit agora que passamos por todas as validações —
+        # assim um erro de validação não consome a janela de bloqueio à toa.
+        _marcar_form_em_processamento(request, 'cadastro_funcionario')
+
         try:
-            rg_limpo = request.POST.get('RG', '').replace('.', '').replace('-', '')
-            cpf_limpo = request.POST.get('CPF', '').replace('.', '').replace('-', '')
-            
-            # 1. COLETA OS DADOS CRUS E PROTEGIDOS
-            documento_funcionario = {
-                'NOME': request.POST.get('NOME', '').upper(),
-                'DATA_NASCIMENTO': request.POST.get('DATA_NASCIMENTO', ''),
-                'RG': rg_limpo,
-                'CPF': cpf_limpo,
-                'SENHA': request.POST.get('SENHA', ''),
-                'NIVEL_ACESSO': request.POST.get('NIVEL_ACESSO', '').upper()
-            }
-
-            # 2. VALIDAÇÃO EXPLÍCITA (Campos Vazios)
-            campos_obrigatorios = ['NOME', 'DATA_NASCIMENTO', 'RG', 'CPF', 'SENHA', 'NIVEL_ACESSO']
-
-            for campo in campos_obrigatorios:
-                valor = documento_funcionario.get(campo, '')
-                if not valor or str(valor).strip() == "" or valor == '—':
-                    return _render_cadastro_func("Preencha todos os campos obrigatórios.")
-
-            # ==========================================
-            # 2.5 TRAVA DE SEGURANÇA DA DATA DE NASCIMENTO
-            # ==========================================
-            data_nasc_str = documento_funcionario['DATA_NASCIMENTO']
-            
-            # Chama a função validadora que criamos no topo do views.py
-            if not data_e_valida(data_nasc_str, tipo="nascimento"):
-                return _render_cadastro_func("A data de nascimento informada é inválida ou irreal.")
-
-            # Verifica idade mínima: 18 anos para Supervisor, 16 para Comum.
-            _nasc = datetime.strptime(data_nasc_str, '%Y-%m-%d').date()
-            _hoje = datetime.today().date()
-            _idade = _hoje.year - _nasc.year - ((_hoje.month, _hoje.day) < (_nasc.month, _nasc.day))
-            _nivel = documento_funcionario.get('NIVEL_ACESSO', '')
-            if _nivel == 'SUPERVISOR' and _idade < 18:
-                return _render_cadastro_func("Supervisores devem ter no mínimo 18 anos.")
-            if _nivel == 'COMUM' and _idade < 16:
-                return _render_cadastro_func("Funcionários devem ter no mínimo 16 anos.")
-
-            # Validação do nível de acesso — deve ser um dos dois valores aceitos.
-            # Sem isso, um valor arbitrário como "GERENTE" passaria pela validação,
-            # seria salvo como FUNCAO no MongoDB e o usuário ficaria como COMUM no Django.
-            cargo_editor = _cargo_usuario(request.user)
-            NIVEIS_VALIDOS = {'SUPERVISOR', 'COMUM'} if cargo_editor == 'GERENTE_GERAL' else {'COMUM'}
-            if _nivel not in NIVEIS_VALIDOS:
-                if cargo_editor == 'SUPERVISOR':
-                    return _render_cadastro_func("Supervisores só podem cadastrar funcionários comuns.")
-                return _render_cadastro_func("O nível de acesso selecionado é inválido.")
-            # ==========================================
-
-            # ==========================================
-            # 2.6 TRAVA DE SEGURANÇA DO CPF (dígito verificador)
-            # ==========================================
-            if not validar_cpf(documento_funcionario['CPF']):
-                return _render_cadastro_func("O CPF informado é inválido.")
-            # ==========================================
-
-            # ==========================================
-            # 2.7 TRAVA DE SEGURANÇA DO RG E DO NOME
-            # ==========================================
-            if not validar_rg(documento_funcionario['RG']):
-                return _render_cadastro_func("O RG informado é inválido (deve conter apenas números).")
-
-            if not texto_tem_letra(documento_funcionario['NOME']):
-                return _render_cadastro_func("O Nome informado é inválido.")
-            # ==========================================
-
-            # ==========================================
-            # 2.8 VALIDAÇÃO DE SENHA
-            # ==========================================
-            senha_raw = documento_funcionario['SENHA']
-            if len(senha_raw) < 8:
-                return _render_cadastro_func("A senha deve ter pelo menos 8 caracteres.")
-            # ==========================================
-
-            # 3. VERIFICAÇÃO DE DUPLICIDADE (Evita crash no Django)
-            cpf = documento_funcionario['CPF']
-            if User.objects.filter(username=cpf).exists():
-                return _render_cadastro_func('Já existe um funcionário cadastrado com este CPF.', nivel='error')
-
-            # Só trava contra duplo submit agora que passamos por todas as validações —
-            # assim um erro de validação não consome a janela de bloqueio à toa.
-            _marcar_form_em_processamento(request, 'cadastro_funcionario')
-
             # 4. CÁLCULO DA IDADE (Agora é 100% seguro, pois a data foi validada acima)
             data_nascimento_obj = datetime.strptime(data_nasc_str, '%Y-%m-%d').date()
             hoje = datetime.today().date()
@@ -821,7 +828,7 @@ def cadastro_funcionario(request):
             documento_funcionario['IDADE'] = idade
             documento_funcionario['FUNCAO'] = nivel
             documento_funcionario['DATA_CADASTRO'] = datetime.now(timezone.utc)
-            
+
             # Removemos a senha e o NIVEL_ACESSO temporário antes de enviar para o MongoDB
             del documento_funcionario['SENHA']
             del documento_funcionario['NIVEL_ACESSO']
