@@ -1,6 +1,4 @@
 {% load static %}
-<link rel="stylesheet" href="{% static 'style_obras.css' %}" />
-
 <div class="wrap">{% include 'partial_messages.html' %}
   <div class="card">
     <div class="header">
@@ -30,17 +28,17 @@
       <div id="aba-dados-edit">
         <div class="form-grid">
           <div class="field full">
-            <label>Nome Completo</label>
-            <input type="text" name="NOME" value="{{ funcionario.NOME }}" style="text-transform: uppercase" />
+            <label for="nome-edita-func">Nome Completo</label>
+            <input type="text" id="nome-edita-func" name="NOME" value="{{ funcionario.NOME }}" style="text-transform: uppercase" />
           </div>
 
           <div class="field">
-            <label>Data de Nascimento</label>
-            <input type="date" name="DATA_NASCIMENTO" value="{{ funcionario.DATA_NASCIMENTO }}" />
+            <label for="data-nascimento-edita-func">Data de Nascimento</label>
+            <input type="date" id="data-nascimento-edita-func" name="DATA_NASCIMENTO" value="{{ funcionario.DATA_NASCIMENTO }}" />
           </div>
 
           <div class="field">
-            <label>RG</label>
+            <label for="rg-edita-func">RG</label>
             <input type="text" name="RG" id="rg-edita-func" value="{{ funcionario.RG }}" maxlength="12" />
           </div>
         </div>
@@ -53,27 +51,27 @@
       <div id="aba-login-edit" style="display: none;">
         <div class="form-grid">
           <div class="field full">
-            <label>CPF (Login)</label>
-            <input type="text" name="CPF" value="{{ funcionario.CPF }}" readonly style="background:#f0f0f0; cursor: not-allowed;" title="O CPF não pode ser alterado por segurança." />
+            <label for="cpf-edita-func">CPF (Login)</label>
+            <input type="text" id="cpf-edita-func" name="CPF" value="{{ funcionario.CPF }}" readonly style="background:#f0f0f0; cursor: not-allowed;" title="O CPF não pode ser alterado por segurança." />
           </div>
 
           <div class="field full">
-            <label>Função no Sistema</label>
-            {% if request.user.is_superuser %}
-            <select name="FUNCAO">
+            <label for="funcao-edita-func">Função no Sistema</label>
+            {% if cargo == 'GERENTE_GERAL' %}
+            <select id="funcao-edita-func" name="FUNCAO">
               <option value="COMUM" {% if funcionario.FUNCAO == 'COMUM' %}selected{% endif %}>FUNCIONÁRIO COMUM (Apenas cadastra obras)</option>
               <option value="SUPERVISOR" {% if funcionario.FUNCAO == 'SUPERVISOR' %}selected{% endif %}>SUPERVISOR (Pode gerenciar funcionários)</option>
             </select>
             {% else %}
-            <select name="FUNCAO">
+            <select id="funcao-edita-func" name="FUNCAO">
               <option value="COMUM" selected>FUNCIONÁRIO COMUM (Apenas cadastra obras)</option>
             </select>
             {% endif %}
           </div>
 
           <div class="field full">
-            <label>Nova Senha (deixe em branco para não alterar)</label>
-            <input type="password" name="SENHA" placeholder="••••••••" autocomplete="new-password" />
+            <label for="senha-edita-func">Nova Senha (deixe em branco para não alterar)</label>
+            <input type="password" id="senha-edita-func" name="SENHA" placeholder="••••••••" autocomplete="new-password" />
           </div>
         </div>
 

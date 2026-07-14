@@ -24,7 +24,7 @@
   <link rel="stylesheet" href="{% static 'style_nav.css' %}?v=3" />
   <link rel="stylesheet" href="{% static 'style_obras.css' %}?v=3" />
   <script src="{% static 'script_menu.js' %}?v=2"></script>
-  <script src="{% static 'script_partials.js' %}?v=2"></script>
+  <script src="{% static 'script_partials.js' %}?v=4"></script>
   <script src="{% static 'htmx.min.js' %}"></script>
   <script src="{% static 'chart.min.js' %}"></script>
   {% block extra_css %}{% endblock %}
@@ -34,7 +34,7 @@
 
 <!-- ── MOBILE TOPBAR ── -->
 <div class="mobile-topbar" id="mobile-topbar">
-  <button class="hamburger-btn" id="hamburger-btn">
+  <button class="hamburger-btn" id="hamburger-btn" aria-label="Abrir menu" aria-expanded="false">
     <span></span><span></span><span></span>
   </button>
   <span class="mobile-topbar-logo">Gestão de Obras</span>
@@ -85,13 +85,14 @@
         <span class="sidebar-link-text">Lista pública</span>
       </a>
 
-      <a hx-get="{% url 'dashboard_publico' %}" hx-target="#conteudo-dinamico" hx-swap="innerHTML" hx-push-url="true"
+      {# Dashboard de Obras descontinuado — usar Looker. Para reativar: descomentar aqui e em urls.py #}
+      {# <a hx-get="{% url 'dashboard_publico' %}" hx-target="#conteudo-dinamico" hx-swap="innerHTML" hx-push-url="true"
          class="sidebar-link">
         <span class="sidebar-link-icon">
           <svg viewBox="0 0 24 24"><rect x="2" y="12" width="5" height="9" rx="1"/><rect x="9" y="7" width="5" height="14" rx="1"/><rect x="16" y="3" width="5" height="18" rx="1"/></svg>
         </span>
         <span class="sidebar-link-text">Dashboard de Obras</span>
-      </a>
+      </a> #}
     </div>
 
     {% if user.is_authenticated %}

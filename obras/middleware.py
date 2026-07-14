@@ -1,3 +1,4 @@
+import logging
 import uuid
 
 from django.conf import settings
@@ -6,6 +7,8 @@ from django.contrib.auth import logout as auth_logout
 from django.http import HttpResponse
 from django.shortcuts import redirect
 from django.urls import reverse
+
+logger = logging.getLogger(__name__)
 
 
 class CSPNonceMiddleware:
@@ -35,9 +38,12 @@ class CSPNonceMiddleware:
             "frame-src https://datastudio.google.com https://lookerstudio.google.com; "
             "object-src 'none'; "
             "form-action 'self'; "
-            "base-uri 'self';"
+            "base-uri 'self'; "
+            "upgrade-insecure-requests;"
         )
         response['Content-Security-Policy'] = csp
+        response['Referrer-Policy'] = 'no-referrer'
+        response['Permissions-Policy'] = 'camera=(), microphone=(), geolocation=()'
         return response
 
 
@@ -50,34 +56,39 @@ class SessaoExpiradaMiddleware:
     segundo plano.
     """
 
+    # Rotas públicas onde um cookie stale não deve forçar redirect para login.
+    # Visitantes anônimos sem sessão válida navegam nessas páginas normalmente.
+    _ROTAS_PUBLICAS = {'/lista-obras/'}  # /dashboard-obras/ descontinuado
+
     def __init__(self, get_response):
         self.get_response = get_response
+        self._url_logout = reverse('logout')
+        self._url_login = reverse('login')
 
     def __call__(self, request):
-        # request.session.session_key só ecoa o valor do cookie recebido, válido ou não.
-        # A validação real só ocorre ao acessar os DADOS da sessão (.keys() força esse
-        # carregamento) — se o cookie aponta para uma sessão expirada/inexistente, vem vazio.
-        cookie_recebido = bool(request.COOKIES.get(settings.SESSION_COOKIE_NAME))
-        sessao_invalida = (
-            cookie_recebido
-            and not request.session.keys()
-            and not request.user.is_authenticated
-        )
+        eh_rota_logout = request.path == self._url_logout
+        eh_rota_login = request.path == self._url_login
+        eh_rota_publica = request.path in self._ROTAS_PUBLICAS or request.path.startswith('/galeria/')
 
-        response = self.get_response(request)
+        if not eh_rota_logout and not eh_rota_login and not eh_rota_publica:
+            # request.session.session_key só ecoa o valor do cookie recebido, válido ou não.
+            # A validação real só ocorre ao acessar os DADOS da sessão (.keys() força esse
+            # carregamento) — se o cookie aponta para uma sessão expirada/inexistente, vem vazio.
+            cookie_recebido = bool(request.COOKIES.get(settings.SESSION_COOKIE_NAME))
+            sessao_invalida = (
+                cookie_recebido
+                and not request.session.keys()
+                and not request.user.is_authenticated
+            )
+            if sessao_invalida:
+                request.session['aviso_login'] = 'inatividade'
+                if request.headers.get('HX-Request'):
+                    resposta = HttpResponse(status=204)
+                    resposta['HX-Redirect'] = reverse('login')
+                    return resposta
+                return redirect('login')
 
-        # Ignora a própria rota de logout (logout_view já redireciona com o
-        # aviso certo) e a rota de login (login_view já lê ?aviso= e mostra a
-        # mensagem certa) — sem isso, a sessão nova/vazia criada nesse meio
-        # tempo é detectada aqui de novo e duplica o aviso na página seguinte.
-        eh_rota_logout = request.path == reverse('logout')
-        eh_rota_login = request.path == reverse('login')
-
-        if sessao_invalida and not eh_rota_logout and not eh_rota_login:
-            request.session['aviso_login'] = 'inatividade'
-            return redirect('login')
-
-        return response
+        return self.get_response(request)
 
 
 class SessaoUnicaMiddleware:
@@ -92,10 +103,12 @@ class SessaoUnicaMiddleware:
 
     def __init__(self, get_response):
         self.get_response = get_response
+        self._url_logout = reverse('logout')
+        self._url_login = reverse('login')
 
     def __call__(self, request):
-        eh_rota_logout = request.path == reverse('logout')
-        eh_rota_login = request.path == reverse('login')
+        eh_rota_logout = request.path == self._url_logout
+        eh_rota_login = request.path == self._url_login
 
         if request.user.is_authenticated and not eh_rota_logout and not eh_rota_login:
             # Import local pra evitar qualquer risco de import circular na
@@ -103,7 +116,11 @@ class SessaoUnicaMiddleware:
             from obras.views import colecao_sessoes_ativas
 
             sessao_atual = request.session.session_key
-            doc = colecao_sessoes_ativas.find_one({'_id': request.user.pk})
+            try:
+                doc = colecao_sessoes_ativas.find_one({'_id': request.user.pk})
+            except Exception:
+                logger.exception("SessaoUnicaMiddleware: erro ao consultar MongoDB — request liberado")
+                return self.get_response(request)
 
             if doc and sessao_atual and doc.get('session_key') != sessao_atual:
                 auth_logout(request)

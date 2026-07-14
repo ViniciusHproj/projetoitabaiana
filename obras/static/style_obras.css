@@ -159,6 +159,9 @@ body{font-family:'DM Sans',sans-serif;font-size:14px;color:var(--text-main);back
 .zadmin-tab:hover{color:var(--text-primary,#111827);background:var(--bg-soft,#f9fafb)}
 .zadmin-tab--active{color:#3b7dd8;background:var(--bg-card,#fff);border-color:var(--border,#e5e7eb)}
 [data-theme="dark"] .zadmin-tab--active{background:var(--card-bg,#1e2433);border-color:rgba(255,255,255,0.1)}
+[data-theme="dark"] .zadmin-tab{color:#9ca3af}
+[data-theme="dark"] .zadmin-tab:hover{color:#ffffff;background:rgba(255,255,255,0.06)}
+[data-theme="dark"] .zadmin-tabs{border-bottom-color:rgba(255,255,255,0.1)}
 
 .zadmin-item{height:auto;min-height:52px;padding:8px 16px;flex-wrap:wrap}
 .zadmin-acoes{display:flex;gap:6px;flex-shrink:0;margin-left:auto}

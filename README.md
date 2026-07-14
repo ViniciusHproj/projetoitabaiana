@@ -14,7 +14,8 @@ Construído com **Django 6**, **MongoDB** (via `django-mongodb-backend` para aut
 - **Sessão única por usuário** — logar em um novo dispositivo encerra automaticamente qualquer sessão anterior daquela conta.
 - **Cadastro e edição de obras**: tipo, situação, tipo de execução, valor, datas (início/conclusão prevista/finalização), empresa contratada (com validação de CNPJ), endereço, galeria de fotos (upload para Cloudinary, até 10 fotos por envio) e geração automática de ID sequencial por ano.
 - **Cadastro e edição de funcionários**: dados pessoais, RG, CPF (com validação de dígito verificador), função (Comum/Supervisor), tudo sincronizado entre o usuário de autenticação (Django) e o perfil de dados (MongoDB).
-- **Controle de acesso por papel**: funcionários comuns podem cadastrar/editar obras; apenas supervisores podem cadastrar/editar outros funcionários.
+- **Controle de acesso por papel**: funcionários comuns podem cadastrar/editar obras; supervisores podem cadastrar/editar funcionários; apenas o Gerente Geral pode alterar cargos e excluir funcionários.
+- **Zona Admin** com abas de gerenciamento de obras (deleção com limpeza no Cloudinary e Google Sheets) e de funcionários (alteração de cargo Supervisor/Comum, exclusão de conta).
 - **Sincronização automática com Google Sheets** a cada cadastro/edição de obra (em segundo plano, não bloqueia a resposta ao usuário; retenta até 3x em caso de falha transiente).
 - **Logout automático por inatividade** (30 minutos), com dupla camada: timer JS no navegador + middleware server-side de fallback.
 - **Tema claro/escuro**, com preferência salva no navegador (`localStorage`).
@@ -26,7 +27,7 @@ Construído com **Django 6**, **MongoDB** (via `django-mongodb-backend` para aut
 
 | Camada | Tecnologia |
 |---|---|
-| Backend | Django 6.0.4 |
+| Backend | Django 6.0.7 |
 | Banco (auth/sessões) | MongoDB via `django-mongodb-backend` |
 | Banco (dados de negócio) | MongoDB via `pymongo` (acesso direto, fora do ORM) |
 | Frontend dinâmico | HTMX 1.9.10 (navegação parcial sem reload completo) |
@@ -56,7 +57,7 @@ obras/
   views.py             # toda a lógica de negócio (cadastro, login, validações, etc.)
   middleware.py        # sessão expirada por inatividade + sessão única por usuário
   utils.py             # helpers de formatação de data compartilhados
-  tests.py             # suite de 209 testes automatizados
+  tests.py             # suite de testes automatizados (ver seção Testes)
   templates/           # templates HTML (HTMX), um por tela/fragmento
   static/              # CSS, JS e fontes (style_nav.css, style_obras.css, script_partials.js, htmx.min.js)
 manage.py
@@ -125,11 +126,11 @@ Em produção (Render), quando `DEBUG=False`, configurações adicionais de segu
 
 ## Deploy
 
-O deploy é automático: qualquer push na branch `main` do GitHub dispara um novo build/deploy no Render (`Procfile` roda `collectstatic` e sobe com `gunicorn`). O desenvolvimento normalmente acontece na branch `dev`, mergeada para `main` quando pronta para publicar:
+O deploy é automático: qualquer push na branch `main` do GitHub dispara um novo build/deploy no Render (`Procfile` roda `collectstatic` e sobe com `gunicorn`). O desenvolvimento normalmente acontece em branches de feature, mergeadas para `main` quando prontas para publicar:
 
 ```powershell
 git checkout main
-git merge dev
+git merge <branch-de-feature>
 git push origin main
 ```
 
@@ -144,7 +145,7 @@ git push origin main
 - **Fontes locais** — `DM Sans` servida pelo próprio servidor via WhiteNoise (sem dependência de CDN externo); elimina rastreamento do Google Fonts e falha de fontes por indisponibilidade de CDN.
 - **`ALLOWED_HOSTS` seguro** — configuração via env var; valor vazio ou ausente resulta em lista vazia (não em `['']` que aceitaria qualquer host) graças a filtro explícito de strings vazias.
 - **Validação de CPF e CNPJ** com cálculo real de dígito verificador (não só formato).
-- **Validação de força de senha** (`AUTH_PASSWORD_VALIDATORS`) aplicada explicitamente no cadastro e na troca de senha de funcionários — Django não faz isso automaticamente fora dos formulários prontos dele.
+- **Validação mínima de senha** (comprimento ≥ 8 caracteres) no cadastro e troca de senha — aplicada por quem cria a conta (Supervisor/Gerente Geral), não pelo próprio usuário.
 - **Proteção contra duplo-submit** em todos os formulários de cadastro/edição: trava temporária de debounce (4s funcionário / 12s obra) + token UUID de uso único por renderização via `cache.add()` atômico.
 - **Token de idempotência** (campo oculto `form_token`) em todos os forms de criação/edição/deleção — POST sem token é rejeitado (fail-secure). Verificação atômica com `cache.add()` elimina race condition de dois POSTs simultâneos.
 - **Audit log de deleção** — cada exclusão de obra registra `logger.warning` com ID da obra, usuário e IP para rastreabilidade.
@@ -166,7 +167,7 @@ python manage.py test obras --keepdb
 
 > **`--keepdb` é obrigatório** após o primeiro setup — sem ele o Django recria o banco de teste do zero e falha com erro de coleção duplicada no MongoDB.
 
-A suite (209 testes) cobre: validadores de CPF/CNPJ/RG/datas/valor, a correção de segurança do IP via `X-Forwarded-For`, rate-limit de login, sessão única por usuário, fluxos completos de cadastro/edição de obras e funcionários (incluindo idempotência por `form_token`, validação de magic bytes de upload, e proteção contra duplo-submit), controle de acesso, login com modal de sucesso, redirect de usuário autenticado em `/login/`, audit log e token de deleção de obra, e pages públicas.
+A suite cobre: validadores de CPF/CNPJ/RG/datas/valor, a correção de segurança do IP via `X-Forwarded-For`, rate-limit de login, sessão única por usuário, fluxos completos de cadastro/edição de obras e funcionários (incluindo idempotência por `form_token`, validação de magic bytes de upload, e proteção contra duplo-submit), controle de acesso, login com modal de sucesso, redirect de usuário autenticado em `/login/`, audit log e token de deleção de obra, páginas públicas, e fluxos de `zona_admin`/`alterar_cargo_funcionario`/`deletar_funcionario`.
 
 Requer conectividade real com o MongoDB do `.env` — os testes usam um banco separado no mesmo cluster (`{MONGODB_DB_NAME}_teste`), criado na primeira execução e preservado via `--keepdb`; nada é gravado no banco de produção. Upload de fotos (Cloudinary) é mockado, então não precisa de credenciais reais do Cloudinary para rodar.
 

@@ -4,17 +4,25 @@ Datas são guardadas no Mongo como string 'DD/MM/AAAA' (ou '—' se vazias),
 enquanto os inputs HTML usam 'AAAA-MM-DD' — essas funções convertem entre
 os dois formatos.
 """
+import logging
+from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 
 def formatar_data_br(data_str):
-    """'AAAA-MM-DD' (input HTML) -> 'DD/MM/AAAA' (armazenado no Mongo)."""
+    """'AAAA-MM-DD' (input HTML) -> 'DD/MM/AAAA' (armazenado no Mongo).
+
+    Usa strptime para validar — strings como '2026-01-15T00:00:00' que
+    passariam num split simples são rejeitadas e retornam '—'.
+    """
     if not data_str or data_str == '—':
         return '—'
     try:
-        ano, mes, dia = data_str.split('-')
-        return f"{dia}/{mes}/{ano[:4]}"
+        return datetime.strptime(data_str, "%Y-%m-%d").strftime("%d/%m/%Y")
     except Exception:
-        return data_str
+        logger.warning("formatar_data_br: formato inesperado recebido — %r", data_str)
+        return '—'
 
 
 def preparar_data_para_input(data_br):
@@ -25,4 +33,5 @@ def preparar_data_para_input(data_br):
         dia, mes, ano = data_br.split('/')
         return f"{ano}-{mes}-{dia}"
     except Exception:
+        logger.warning("preparar_data_para_input: formato inesperado no Mongo — %r", data_br)
         return ""

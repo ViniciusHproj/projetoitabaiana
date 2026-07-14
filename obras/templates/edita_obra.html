@@ -1,6 +1,4 @@
 {% load static %}
-<link rel="stylesheet" href="{% static 'style_obras.css' %}" />
-
 <div class="wrap">{% include 'partial_messages.html' %}
   <div class="card">
     <div class="header">
@@ -17,7 +15,7 @@
       </div>
     </div>
     <div class="divider" style="margin-top: 0;"></div>
-    <form id="form-edita-obra" hx-post="{% url 'salva_edicao_obra' %}" hx-target="#conteudo-dinamico" hx-encoding="multipart/form-data" enctype="multipart/form-data" hx-indicator="#btn-salvar-alteracoes" hx-trigger="confirmar-edita-obra">
+    <form id="form-edita-obra" method="post" hx-post="{% url 'salva_edicao_obra' %}" hx-target="#conteudo-dinamico" hx-encoding="multipart/form-data" enctype="multipart/form-data" hx-indicator="#btn-salvar-alteracoes" hx-trigger="confirmar-edita-obra">
       {% csrf_token %}
       <input type="hidden" name="form_token" value="{{ form_token }}">
 
@@ -25,13 +23,13 @@
 
       <div class="form-grid">
         <div class="field full">
-          <label>Tipo de Obra</label>
-          <input value="{{ obra.TIPO_OBRA|default:'' }}"  type="text" name="TIPO_OBRA" style="text-transform: uppercase" />
+          <label for="tipo-obra-edit">Tipo de Obra</label>
+          <input value="{{ obra.TIPO_OBRA|default:'' }}" id="tipo-obra-edit" type="text" name="TIPO_OBRA" style="text-transform: uppercase" />
         </div>
 
         <div class="field">
-          <label>Situação</label>
-          <select name="SITUACAO" required>
+          <label for="situacao-edit">Situação</label>
+          <select id="situacao-edit" name="SITUACAO" required>
             <option value="">Selecione...</option>
             <option value="Finalizada por conclusão de construção" {% if obra.SITUACAO == "Finalizada por conclusão de construção" %}selected{% endif %}>Finalizada por conclusão de construção</option>
             <option value="Finalizada por distrato" {% if obra.SITUACAO == "Finalizada por distrato" %}selected{% endif %}>Finalizada por distrato</option>
@@ -43,7 +41,7 @@
         </div>
 
         <div class="field">
-          <label>Valor Total da Obra</label>
+          <label for="valorObraEdit">Valor Total da Obra</label>
           <div class="valor-wrap">
             <span class="valor-prefix">R$</span>
             <input  type="text" id="valorObraEdit" name="VALOR_OBRA" class="valor-input" value="{{ obra.VALOR_OBRA|default:'' }}" inputmode="numeric" />
@@ -51,23 +49,23 @@
         </div>
 
         <div class="field">
-          <label>Data de Início</label>
-          <input type="date" name="DATA_INICIO" value="{{ obra.DATA_INICIO }}"  />
+          <label for="data-inicio-edit">Data de Início</label>
+          <input type="date" id="data-inicio-edit" name="DATA_INICIO" value="{{ obra.DATA_INICIO }}" />
         </div>
 
         <div class="field">
-          <label>Conclusão Prevista</label>
-          <input type="date" name="CONCLUSAO_PREVISTA" value="{{ obra.CONCLUSAO_PREVISTA }}"  />
+          <label for="conclusao-prevista-edit">Conclusão Prevista</label>
+          <input type="date" id="conclusao-prevista-edit" name="CONCLUSAO_PREVISTA" value="{{ obra.CONCLUSAO_PREVISTA }}" />
         </div>
 
         <div class="field">
-          <label>Data de Finalização</label>
-          <input type="date" name="DATA_FINALIZACAO" value="{{ obra.DATA_FINALIZACAO }}" />
+          <label for="data-finalizacao-edit">Data de Finalização</label>
+          <input type="date" id="data-finalizacao-edit" name="DATA_FINALIZACAO" value="{{ obra.DATA_FINALIZACAO }}" />
         </div>
 
         <div class="field">
-          <label>Tipo de Execução</label>
-          <select name="TIPO_EXECUCAO" required>
+          <label for="tipo-execucao-edit">Tipo de Execução</label>
+          <select id="tipo-execucao-edit" name="TIPO_EXECUCAO" required>
             <option value="">Selecione...</option>
             <option value="Nova Construção" {% if obra.TIPO_EXECUCAO == "Nova Construção" %}selected{% endif %}>Nova Construção</option>
             <option value="Reforma" {% if obra.TIPO_EXECUCAO == "Reforma" %}selected{% endif %}>Reforma</option>
@@ -78,22 +76,22 @@
         </div>
 
         <div class="field full">
-          <label>Nome da Empresa</label>
-          <input value="{{ obra.NOME_EMPRESA|default:'' }}"  type="text" name="NOME_EMPRESA" style="text-transform: uppercase" />
+          <label for="nome-empresa-edit">Nome da Empresa</label>
+          <input value="{{ obra.NOME_EMPRESA|default:'' }}" id="nome-empresa-edit" type="text" name="NOME_EMPRESA" style="text-transform: uppercase" />
         </div>
 
         <div class="field full">
-          <label>Cnpj da Empresa</label>
+          <label for="cnpj_edit">Cnpj da Empresa</label>
           <input value="{{ obra.CNPJ_EMPRESA|default:'' }}" type="text" name="CNPJ_EMPRESA" id="cnpj_edit" maxlength="18">
         </div>
 
         <div class="field full">
-          <label>Endereço</label>
-          <input  type="text" name="ENDERECO" value="{{ obra.ENDERECO|default:'' }}" style="text-transform: uppercase" />
+          <label for="endereco-edit">Endereço</label>
+          <input id="endereco-edit" type="text" name="ENDERECO" value="{{ obra.ENDERECO|default:'' }}" style="text-transform: uppercase" />
         </div>
 
         <div class="field full">
-          <label>Adicionar Novas Fotos</label>
+          <label for="fotoObra">Adicionar Novas Fotos</label>
           <input type="file" id="fotoObra" name="FOTO_OBRA" accept="image/*" multiple style="width: 100%; padding: 8px; background: #f9f9f9; border: 1px dashed #ccc; border-radius: 4px;">
           <small style="color: #666; font-size: 11px;">As fotos selecionadas serão adicionadas à galeria existente da obra.</small>
       </div>

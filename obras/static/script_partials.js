@@ -139,6 +139,24 @@ function _mostrarAlerta(mensagem, tipo) {
   setTimeout(function () { if (div.parentNode) div.parentNode.removeChild(div); }, 4000);
 }
 
+/* ── Cleanup de listeners globais entre trocas de partial ──
+   initPartial chama _removerListenersGlobais() antes de cada init*,
+   garantindo que não acumulem listeners no document a cada navegação HTMX. */
+var _listenersGlobais = [];
+function _addDocListener(tipo, fn) {
+  document.addEventListener(tipo, fn);
+  _listenersGlobais.push([tipo, fn]);
+}
+function _removerListenersGlobais() {
+  _listenersGlobais.forEach(function (par) { document.removeEventListener(par[0], par[1]); });
+  _listenersGlobais = [];
+  // Desconecta o MutationObserver do dashboard ao sair — evita acúmulo por navegação HTMX
+  if (_dashThemeObserver) { _dashThemeObserver.disconnect(); _dashThemeObserver = null; }
+  // Remove tooltip flutuante que possa ter ficado preso no DOM após navegação HTMX
+  var _orphanTooltip = document.querySelector('.exclusao-tooltip');
+  if (_orphanTooltip) _orphanTooltip.remove();
+}
+
 /* ── Auto-retry em falhas de rede / 5xx ── */
 function _configurarRetry(form, evento) {
   var tentativas = 0;
@@ -150,9 +168,6 @@ function _configurarRetry(form, evento) {
     return indicatorSel ? document.querySelector(indicatorSel) : null;
   }
 
-  form.addEventListener('htmx:configRequest', function (evt) {
-    if (tentativas > 0) evt.detail.headers['X-Auto-Retry'] = 'true';
-  });
 
   function _agendar() {
     if (tentativas >= maxTentativas) {
@@ -162,7 +177,7 @@ function _configurarRetry(form, evento) {
         var novo = el.cloneNode(false);
         novo.classList.remove('htmx-request');
         novo.setAttribute('type', 'button');
-        novo.innerHTML = 'Recarregar Página';
+        novo.textContent = 'Recarregar Página';
         novo.style.cssText = 'background:#b91c1c;cursor:pointer;';
         novo.addEventListener('click', function () { window.location.reload(); }, { once: true });
         el.parentNode.replaceChild(novo, el);
@@ -211,7 +226,7 @@ function initCadastroObras() {
   document.getElementById('modal-confirmar').addEventListener('click', function () { fecharModal(); htmx.trigger(form, 'confirmar-cadastro'); });
   document.getElementById('modal-cancelar').addEventListener('click', fecharModal);
   document.getElementById('modal-backdrop').addEventListener('click', fecharModal);
-  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && modal.style.display === 'flex') fecharModal(); });
+  _addDocListener('keydown', function (e) { if (e.key === 'Escape' && modal.style.display === 'flex') fecharModal(); });
 
   var valorInput = document.getElementById('valorObra');
   if (valorInput) valorInput.addEventListener('input', mascaraValorBRL);
@@ -238,7 +253,7 @@ function initCadastroFunc() {
   document.getElementById('btn-fechar-modal-func').addEventListener('click', fecharModal);
   document.getElementById('modal-confirmar-func').addEventListener('click', function () { fecharModal(); htmx.trigger(form, 'confirmar-cadastro-func'); });
   document.getElementById('modal-backdrop-func').addEventListener('click', fecharModal);
-  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && modal.style.display === 'flex') fecharModal(); });
+  _addDocListener('keydown', function (e) { if (e.key === 'Escape' && modal.style.display === 'flex') fecharModal(); });
 
   var rgInput  = document.getElementById('rg-cadastro-func');
   var cpfInput = document.getElementById('cpf-cadastro-func');
@@ -265,7 +280,7 @@ function initEditaObra() {
   document.getElementById('btn-fechar-modal-edita-obra').addEventListener('click', fecharModal);
   document.getElementById('modal-confirmar-edita-obra').addEventListener('click', function () { fecharModal(); htmx.trigger(form, 'confirmar-edita-obra'); });
   document.getElementById('modal-backdrop-edita-obra').addEventListener('click', fecharModal);
-  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && modal.style.display === 'flex') fecharModal(); });
+  _addDocListener('keydown', function (e) { if (e.key === 'Escape' && modal.style.display === 'flex') fecharModal(); });
 
   var valorInput = document.getElementById('valorObraEdit');
   if (valorInput) valorInput.addEventListener('input', mascaraValorBRL);
@@ -292,65 +307,10 @@ function initEditaFunc() {
   document.getElementById('btn-fechar-modal-edita-func').addEventListener('click', fecharModal);
   document.getElementById('modal-confirmar-edita-func').addEventListener('click', function () { fecharModal(); htmx.trigger(form, 'confirmar-edita-func'); });
   document.getElementById('modal-backdrop-edita-func').addEventListener('click', fecharModal);
-  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && modal.style.display === 'flex') fecharModal(); });
+  _addDocListener('keydown', function (e) { if (e.key === 'Escape' && modal.style.display === 'flex') fecharModal(); });
 
   var rgInput = document.getElementById('rg-edita-func');
   if (rgInput) rgInput.addEventListener('input', function () { mascaraRG(this); });
-}
-
-/* ── Zona de Exclusão ── */
-function initZonaExclusao() {
-  var modal = document.getElementById('modal-exclusao');
-  if (!modal) return;
-  var formExclusao = document.getElementById('form-confirmar-exclusao');
-  if (formExclusao) _configurarRetry(formExclusao, 'submit');
-
-  var inputId  = document.getElementById('modal-exclusao-input-id');
-  var spanId   = document.getElementById('modal-exclusao-id');
-  var spanTipo = document.getElementById('modal-exclusao-tipo');
-
-  document.querySelectorAll('.btn-excluir').forEach(function (btn) {
-    btn.addEventListener('click', function () {
-      inputId.value       = btn.dataset.id;
-      spanId.textContent  = btn.dataset.id;
-      spanTipo.textContent = btn.dataset.tipo !== '—' ? btn.dataset.tipo : '';
-      modal.style.display = 'flex';
-    });
-  });
-
-  function fecharModal() {
-    modal.style.display = 'none';
-    inputId.value = '';
-  }
-
-  document.getElementById('modal-exclusao-cancelar').addEventListener('click', fecharModal);
-  document.getElementById('modal-exclusao-backdrop').addEventListener('click', fecharModal);
-
-  document.addEventListener('keydown', function (e) {
-    if (e.key === 'Escape' && modal.style.display === 'flex') fecharModal();
-  });
-
-  document.querySelectorAll('.exclusao-marquee').forEach(function (el) {
-    el.addEventListener('mouseenter', function () {
-      if (el.scrollWidth <= el.clientWidth) return;
-      var overflow = el.scrollWidth - el.clientWidth;
-      var span = document.createElement('span');
-      span.textContent = el.textContent;
-      el.textContent = '';
-      el.appendChild(span);
-      el.style.textOverflow = 'clip';
-      span.style.display = 'inline-block';
-      el.style.setProperty('--mq-end', '-' + overflow + 'px');
-      span.style.animation = 'exclusao-marquee 3s linear infinite';
-    });
-    el.addEventListener('mouseleave', function () {
-      var span = el.querySelector('span');
-      if (!span) return;
-      el.textContent = span.textContent;
-      el.style.textOverflow = '';
-      el.style.removeProperty('--mq-end');
-    });
-  });
 }
 
 /* ── Dashboard de Obras ── */
@@ -710,6 +670,9 @@ function initZonaAdmin() {
   var spanTipo = document.getElementById('modal-exclusao-tipo');
 
   if (modal) {
+    var formExcObra = document.getElementById('form-confirmar-exclusao');
+    if (formExcObra) _configurarRetry(formExcObra, 'submit');
+
     function fecharModal() { modal.style.display = 'none'; if (inputId) inputId.value = ''; }
     document.querySelectorAll('.btn-excluir[data-id]').forEach(function (btn) {
       btn.addEventListener('click', function () {
@@ -728,6 +691,9 @@ function initZonaAdmin() {
   /* ── Modal de alteração de cargo ── */
   var modalCargo = document.getElementById('modal-cargo');
   if (modalCargo) {
+    var formCargo = document.getElementById('form-alterar-cargo');
+    if (formCargo) _configurarRetry(formCargo, 'submit');
+
     function fecharCargo() { modalCargo.style.display = 'none'; }
     document.querySelectorAll('.btn-alterar-cargo').forEach(function (btn) {
       btn.addEventListener('click', function () {
@@ -752,6 +718,9 @@ function initZonaAdmin() {
   /* ── Modal de exclusão de funcionário ── */
   var modalExcFunc = document.getElementById('modal-exclusao-func');
   if (modalExcFunc) {
+    var formExcFunc = document.getElementById('form-confirmar-excfunc');
+    if (formExcFunc) _configurarRetry(formExcFunc, 'submit');
+
     function fecharExcFunc() { modalExcFunc.style.display = 'none'; }
     document.querySelectorAll('[data-cpf][data-nome].btn-excluir').forEach(function (btn) {
       btn.addEventListener('click', function () {
@@ -768,12 +737,12 @@ function initZonaAdmin() {
     if (excBdrop) excBdrop.addEventListener('click', fecharExcFunc);
   }
 
-  /* ── Escape fecha qualquer modal aberto ── */
-  document.addEventListener('keydown', function (e) {
+  /* ── Escape fecha qualquer modal aberto e limpa estado interno ── */
+  _addDocListener('keydown', function (e) {
     if (e.key !== 'Escape') return;
-    [modal, modalCargo, modalExcFunc].forEach(function (m) {
-      if (m && m.style.display === 'flex') m.style.display = 'none';
-    });
+    if (modal && modal.style.display === 'flex' && typeof fecharModal === 'function') fecharModal();
+    if (modalCargo && modalCargo.style.display === 'flex' && typeof fecharCargo === 'function') fecharCargo();
+    if (modalExcFunc && modalExcFunc.style.display === 'flex' && typeof fecharExcFunc === 'function') fecharExcFunc();
   });
 
   /* ── Click-to-expand: tooltip flutuante para textos truncados ── */
@@ -795,11 +764,12 @@ function initZonaAdmin() {
       document.body.appendChild(_tooltip);
     });
   });
-  document.addEventListener('click', _fecharTooltip);
+  _addDocListener('click', _fecharTooltip);
 }
 
 /* ── Dispatcher ── */
 function initPartial() {
+  _removerListenersGlobais();
   if (document.getElementById('form-login'))             initLogin();
   if (document.getElementById('cpf-busca-func'))         initBuscaFunc();
   if (document.getElementById('form-cadastro-obras'))    initCadastroObras();

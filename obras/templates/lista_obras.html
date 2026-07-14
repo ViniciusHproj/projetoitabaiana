@@ -153,13 +153,15 @@
     {% if total_paginas > 1 %}
     <div style="display: flex; justify-content: center; align-items: center; gap: 12px; margin-top: 24px;">
         {% if tem_anterior %}
-            <a hx-get="{% url 'lista_obras' %}?pagina={{ pagina_atual|add:'-1' }}"
+            <a href="{% url 'lista_obras' %}?pagina={{ pagina_atual|add:'-1' }}"
+               hx-get="{% url 'lista_obras' %}?pagina={{ pagina_atual|add:'-1' }}"
                hx-target="#conteudo-dinamico" hx-swap="innerHTML" hx-push-url="true"
                style="padding: 8px 16px; border-radius: 8px; background: #4589C8; color: white; text-decoration: none; font-weight: 600; cursor: pointer;">← Anterior</a>
         {% endif %}
         <span style="font-size: 14px; color: #555;">Página {{ pagina_atual }} de {{ total_paginas }}</span>
         {% if tem_proxima %}
-            <a hx-get="{% url 'lista_obras' %}?pagina={{ pagina_atual|add:'1' }}"
+            <a href="{% url 'lista_obras' %}?pagina={{ pagina_atual|add:'1' }}"
+               hx-get="{% url 'lista_obras' %}?pagina={{ pagina_atual|add:'1' }}"
                hx-target="#conteudo-dinamico" hx-swap="innerHTML" hx-push-url="true"
                style="padding: 8px 16px; border-radius: 8px; background: #4589C8; color: white; text-decoration: none; font-weight: 600; cursor: pointer;">Próxima →</a>
         {% endif %}

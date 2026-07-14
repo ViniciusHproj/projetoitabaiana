@@ -177,7 +177,7 @@
       {% for func in funcionarios %}
       <div class="exclusao-item zadmin-item">
         <span class="exclusao-id" style="min-width:100px; font-size:12px;">
-          {{ func.CPF|default:"—" }}
+          {{ func.CPF_MASCARADO|default:"—" }}
         </span>
         <span class="exclusao-end exclusao-marquee" style="font-weight:600;">
           {{ func.NOME|default:"—" }}
@@ -284,7 +284,7 @@
             style="flex:1;">
         {% csrf_token %}
         <input type="hidden" name="id_obra" id="modal-exclusao-input-id" value="">
-        <input type="hidden" name="form_token" value="{{ form_token }}">
+        <input type="hidden" name="form_token" value="{{ form_token_obra }}">
         <button type="submit" id="btn-confirmar-exclusao" style="width:100%; padding:10px 0; border-radius:8px; font-size:0.9rem; font-weight:600; cursor:pointer; border:none; background:#dc2626; color:#fff; font-family:inherit; display:flex; align-items:center; justify-content:center; gap:8px; transition:background .15s, opacity .15s;">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
@@ -324,7 +324,7 @@
             style="flex:1;">
         {% csrf_token %}
         <input type="hidden" name="cpf" id="modal-excfunc-cpf" value="">
-        <input type="hidden" name="form_token" value="{{ form_token }}">
+        <input type="hidden" name="form_token" value="{{ form_token_deletar_func }}">
         <button type="submit" id="btn-confirmar-excfunc" style="width:100%; padding:10px 0; border-radius:8px; font-size:0.9rem; font-weight:600; cursor:pointer; border:none; background:#dc2626; color:#fff; font-family:inherit; display:flex; align-items:center; justify-content:center; gap:8px; transition:background .15s, opacity .15s;">
           Confirmar exclusão
           <div class="spinner-loading" style="border-color:rgba(255,255,255,0.3); border-top-color:#fff;"></div>
@@ -354,7 +354,7 @@
           hx-indicator="#btn-confirmar-cargo">
       {% csrf_token %}
       <input type="hidden" name="cpf" id="modal-cargo-cpf" value="">
-      <input type="hidden" name="form_token" id="modal-cargo-token" value="{{ form_token }}">
+      <input type="hidden" name="form_token" id="modal-cargo-token" value="{{ form_token_cargo }}">
       <div style="margin-bottom:20px; text-align:left;">
         <label style="font-size:12.5px; font-weight:600; color:var(--text-secondary,#6b7280); display:block; margin-bottom:6px;">Novo cargo</label>
         <select name="novo_cargo" id="modal-cargo-select" style="width:100%; padding:9px 12px; border-radius:8px; border:1px solid var(--border,#e5e7eb); font-family:inherit; font-size:13.5px; background:var(--bg-card,#fff); color:var(--text-primary,#111827);">

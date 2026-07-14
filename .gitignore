@@ -17,6 +17,20 @@ CLAUDE.md
 # Scripts utilitários locais (dados sensíveis — não versionar)
 scripts/
 
+# Auditorias internas — documentação local, não faz parte do deploy
+auditoria/
+
 # Sistema operacional
 .DS_Store
 Thumbs.db
+
+# Logs e cobertura de testes
+*.log
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Artefatos de build Python
+*.egg-info/
+dist/
+build/

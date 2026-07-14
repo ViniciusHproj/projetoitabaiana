@@ -1,10 +1,7 @@
-from django.contrib import admin
 from django.urls import path
-from obras.views import pagina_inicial, cadastro_obras, index, cadastro_funcionario, lista_obras, busca_atualiza_obra, busca_atualiza_funcionario, salva_edicao_obra, salva_edicao_funcionario, login_view, logout_view, galeria_obra, deletar_obra, deletar_funcionario, dashboard_publico, zona_admin, alterar_cargo_funcionario
-from django.contrib.auth import views as auth_views
-
+from obras.views import pagina_inicial, cadastro_obras, index, cadastro_funcionario, lista_obras, busca_atualiza_obra, busca_atualiza_funcionario, salva_edicao_obra, salva_edicao_funcionario, login_view, logout_view, galeria_obra, deletar_obra, deletar_funcionario, zona_admin, alterar_cargo_funcionario
+# dashboard_publico descontinuado — usar Looker. Reativar: importar aqui e readicionar path abaixo.
 urlpatterns = [
-    path('admin/', admin.site.urls),
     path('', pagina_inicial, name='raizhome'),
     path('cadastro-obras/', cadastro_obras, name='Cadastro-Obras'),
     path('inicio/', index, name='inicio'),
@@ -20,7 +17,7 @@ urlpatterns = [
     path('salvar-edicao-funcionario/', salva_edicao_funcionario, name='salva_edicao_funcionario'),
     path('galeria/<str:id_obra>/', galeria_obra, name='galeria_obra'),
     path('deletar-obra/', deletar_obra, name='deletar_obra'),
-    path('dashboard-obras/', dashboard_publico, name='dashboard_publico'),
+    # path('dashboard-obras/', dashboard_publico, name='dashboard_publico'),  # descontinuado — usar Looker
     path('zona-admin/', zona_admin, name='zona_admin'),
     path('alterar-cargo/', alterar_cargo_funcionario, name='alterar_cargo_funcionario'),
     path('deletar-funcionario/', deletar_funcionario, name='deletar_funcionario'),

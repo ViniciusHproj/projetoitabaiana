@@ -1,6 +1,7 @@
 import os
 import json
 import logging
+import re
 import threading
 import time
 import gspread
@@ -12,14 +13,16 @@ from django.contrib import messages
 from django.core.cache import cache
 import ntplib
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from django.contrib.auth.models import User
 
 import cloudinary.uploader
 from django.contrib.auth import authenticate, login as auth_login
 from django.contrib.auth import logout as auth_logout
+
 from django.contrib.messages import get_messages
 from django.utils.http import url_has_allowed_host_and_scheme
+from django.http import HttpResponse, HttpResponseNotAllowed
 from django.urls import reverse
 from obras.utils import formatar_data_br, preparar_data_para_input
 # Create your views here.
@@ -111,6 +114,12 @@ except Exception:
     logger.exception("Não foi possível garantir o índice em CPF")
 
 try:
+    # Acelera a ordenação por mais recente na zona admin (sort por DATA_CADASTRO).
+    colecao_funcionarios.create_index('DATA_CADASTRO')
+except Exception:
+    logger.exception("Não foi possível garantir o índice em DATA_CADASTRO (funcionários)")
+
+try:
     # Acelera a busca de fotos/histórico de uma obra (galeria_obra, timelapse).
     colecao_timelapse.create_index('ID_OBRA')
 except Exception:
@@ -155,6 +164,20 @@ _MAGIC_BYTES_FOTO = [
     (b'GIF89a', 'GIF'),
     (b'RIFF', 'WEBP'),  # WEBP: RIFF....WEBP — checagem adicional abaixo
 ]
+# Regex para extração de public_id Cloudinary (usadas em _extrair_public_id_cloudinary)
+_RE_CLOUDINARY_VERSAO = re.compile(r'^v\d+$')
+_RE_CLOUDINARY_TRANSFORM = re.compile(r'^[a-z]{1,3}_[a-zA-Z0-9]|,')
+# Paginação e cache de lista_obras (pública) e zona_admin
+_OBRAS_POR_PAGINA_PUBLICA = 12
+_CACHE_TTL_LISTA_OBRAS = 120  # segundos
+_OBRAS_POR_PAGINA_ADMIN = 10
+# Projeção fixa para lista_obras — exclui GALERIA (array de até 10 URLs) e demais campos não exibidos
+_CAMPOS_LISTA_OBRAS = {
+    'ID_OBRA': 1, 'TIPO_OBRA': 1, 'VALOR_OBRA': 1, 'SITUACAO': 1,
+    'EMPRESA_CONTRATADA': 1, 'TIPO_EXECUCAO': 1, 'ENDERECO': 1,
+    'DATA_INICIO': 1, 'CONCLUSAO_PREVISTA': 1, 'DATA_FINALIZACAO': 1,
+    'URL_FOTO': 1, '_id': 0,
+}
 
 
 def _validar_foto(foto):
@@ -219,7 +242,8 @@ def _ler_contador_login(chave):
     doc = colecao_seguranca_login.find_one({'_id': chave})
     if not doc:
         return 0, 0
-    restante = (doc['expira_em'] - datetime.utcnow()).total_seconds()
+    # pymongo devolve datetimes sem tzinfo (naive UTC); comparar com naive UTC também.
+    restante = (doc['expira_em'] - datetime.now(timezone.utc).replace(tzinfo=None)).total_seconds()
     if restante <= 0:
         return 0, 0
     return doc.get('contagem', 0), restante
@@ -257,7 +281,7 @@ def _incrementar_contador_login(chave, expira_em, agora):
     """Incrementa atomicamente o contador de tentativas e retorna a nova contagem."""
     resultado = colecao_seguranca_login.find_one_and_update(
         {'_id': chave},
-        {'$inc': {'contagem': 1}, '$set': {'expira_em': expira_em, 'atualizado_em': agora}},
+        {'$inc': {'contagem': 1}, '$set': {'atualizado_em': agora}, '$setOnInsert': {'expira_em': expira_em}},
         upsert=True,
         return_document=True,
     )
@@ -265,7 +289,9 @@ def _incrementar_contador_login(chave, expira_em, agora):
 
 
 def _registrar_tentativa_falha_login(request, chave_ip, chave_cpf, cpf_tentado):
-    agora = datetime.utcnow()
+    """Registra tentativa falha e retorna (nova_contagem_ip, nova_contagem_cpf)
+    para que o caller calcule tentativas restantes sem releitura do banco."""
+    agora = datetime.now(timezone.utc)
     expira_em = agora + timedelta(seconds=LOGIN_JANELA_BLOQUEIO_SEGUNDOS)
 
     nova_contagem_ip = _incrementar_contador_login(chave_ip, expira_em, agora)
@@ -279,13 +305,15 @@ def _registrar_tentativa_falha_login(request, chave_ip, chave_cpf, cpf_tentado):
         if chave_cpf:
             _registrar_bloqueio_repetido(cpf_tentado)
 
+    return nova_contagem_ip, nova_contagem_cpf
+
 
 def _registrar_bloqueio_repetido(cpf_tentado):
     """Conta quantas vezes essa conta foi bloqueada nas últimas 24h. Vários
     bloqueios seguidos na mesma conta sugerem um ataque direcionado a um
     usuário específico (não só um erro de digitação ocasional)."""
     chave_alerta = f'login_alerta_cpf_{cpf_tentado}'
-    agora = datetime.utcnow()
+    agora = datetime.now(timezone.utc)
     expira_em = agora + timedelta(hours=24)
 
     # Incremento atômico: se o documento expirou (expira_em <= agora), reinicia o
@@ -324,7 +352,7 @@ def _limpar_tentativas_login(chave_ip, chave_cpf):
         colecao_seguranca_login.delete_one({'_id': chave_cpf})
 
 
-def _form_ja_em_processamento(request, nome_acao, segundos=4):
+def _form_ja_em_processamento(request, nome_acao):
     """Trava server-side contra duplo clique/duplo submit: o hx-indicator do
     HTMX só desabilita o botão visualmente — não impede um segundo POST real
     (ex: clique muito rápido, ou script automatizado). Usa o cache como lock
@@ -369,8 +397,8 @@ def dashboard_publico(request):
         ]}})
         paralisadas = colecao_obras.count_documents({"SITUACAO": {"$in": ["Paralisada", "Cancelada"]}})
 
-        # Investimento total — $sum direto pois VALOR_OBRA agora é float no banco
-        pipeline_invest_total = [{"$group": {"_id": None, "total": {"$sum": "$VALOR_OBRA"}}}]
+        # Investimento total — $toDouble para tolerar documentos legados com VALOR_OBRA como string
+        pipeline_invest_total = [{"$group": {"_id": None, "total": {"$sum": {"$toDouble": {"$ifNull": ["$VALOR_OBRA", 0]}}}}}]
         invest_total_raw = list(colecao_obras.aggregate(pipeline_invest_total))
         investimento_total = invest_total_raw[0]["total"] if invest_total_raw else 0.0
 
@@ -391,11 +419,11 @@ def dashboard_publico(request):
         anos_labels = [a["_id"] for a in anos_raw]
         anos_counts = [a["count"] for a in anos_raw]
 
-        # Investimento por ano — $sum direto pois VALOR_OBRA é float
+        # Investimento por ano — $toDouble para tolerar docs legados com VALOR_OBRA string
         pipeline_invest_ano = [
             {"$addFields": {"ano": {"$substr": ["$DATA_INICIO", 6, 4]}}},
             {"$match": {"ano": {"$regex": "^[0-9]{4}$"}}},
-            {"$group": {"_id": "$ano", "total": {"$sum": "$VALOR_OBRA"}}},
+            {"$group": {"_id": "$ano", "total": {"$sum": {"$toDouble": {"$ifNull": ["$VALOR_OBRA", 0]}}}}},
             {"$sort": {"_id": 1}},
         ]
         invest_ano_raw = list(colecao_obras.aggregate(pipeline_invest_ano))
@@ -435,6 +463,7 @@ def dashboard_publico(request):
             "empresas": empresas,
         }
     except Exception:
+        logger.exception("Erro ao carregar dados do dashboard público")
         ctx = {
             "total": "—", "em_execucao": "—", "finalizadas": "—", "paralisadas": "—",
             "investimento_total": 0,
@@ -471,7 +500,7 @@ def data_e_valida(data_str, tipo="geral"):
         
     try:
         data_obj = datetime.strptime(data_str, '%Y-%m-%d').date()
-        ano_atual = datetime.now().year
+        ano_atual = datetime.now(timezone.utc).year
 
         # Regra 1: Absolutamente nenhuma data no sistema pode ser antes de 1900
         if data_obj.year < 1900:
@@ -659,7 +688,7 @@ def login_view(request):
                 request.session.save()
             colecao_sessoes_ativas.update_one(
                 {'_id': user.pk},
-                {'$set': {'session_key': request.session.session_key, 'atualizado_em': datetime.utcnow()}},
+                {'$set': {'session_key': request.session.session_key, 'atualizado_em': datetime.now(timezone.utc)}},
                 upsert=True,
             )
 
@@ -697,8 +726,9 @@ def login_view(request):
                 'proxima_url': proxima_url,
             })
         else:
-            _registrar_tentativa_falha_login(request, chave_ip, chave_cpf, usuario_cpf)
-            restantes = _tentativas_restantes(chave_ip, chave_cpf)
+            nova_c_ip, nova_c_cpf = _registrar_tentativa_falha_login(request, chave_ip, chave_cpf, usuario_cpf)
+            usadas = max(nova_c_ip, nova_c_cpf)
+            restantes = max(0, LOGIN_MAX_TENTATIVAS - usadas)
             # Se errar o login, também limpamos antes de mostrar o erro
             storage = get_messages(request)
             for _ in storage: pass
@@ -713,13 +743,18 @@ def login_view(request):
             # tentativa de login (e do POST de senha) num F5.
             return redirect('login')
 
-    return render(request, 'login.html')
+    return HttpResponseNotAllowed(['GET', 'POST'])
+
+
 def logout_view(request):
     if request.method != 'POST':
-        from django.http import HttpResponseNotAllowed
         return HttpResponseNotAllowed(['POST'])
     motivo = request.POST.get('motivo', '')
     if request.user.is_authenticated:
+        try:
+            colecao_sessoes_ativas.delete_one({'_id': request.user.pk})
+        except Exception:
+            logger.exception("Erro ao remover sessão ativa no logout — user=%s", request.user.pk)
         auth_logout(request)
     if motivo == 'inatividade':
         request.session['aviso_login'] = 'inatividade'
@@ -737,12 +772,13 @@ def pegar_ano_google():
     try:
         cliente_ntp = ntplib.NTPClient()
         resposta = cliente_ntp.request('pool.ntp.org', version=3)
-        ano = datetime.fromtimestamp(resposta.tx_time).year
+        ano = datetime.utcfromtimestamp(resposta.tx_time).year
     except Exception:
-        ano = datetime.now().year
+        ano = datetime.now(timezone.utc).year
     cache.set(_CACHE_KEY_ANO, ano, 3600)
     return ano
-    
+
+
 def cadastro_funcionario(request):
     # 1. Bloqueio para quem nem logou ainda
     if not request.user.is_authenticated:
@@ -765,14 +801,11 @@ def cadastro_funcionario(request):
         return redirect('cadastro_funcionario')
 
     if request.method == 'POST' and 'btn-salvar' in request.POST:
-        _eh_retry = request.headers.get('X-Auto-Retry') == 'true'
-        if not _eh_retry and _form_ja_em_processamento(request, 'cadastro_funcionario'):
+        if _form_ja_em_processamento(request, 'cadastro_funcionario'):
             return _render_cadastro_func("Já recebemos uma solicitação recente. Evite enviar mais de uma vez.")
 
-        if not _eh_retry and _token_ja_usado(request.POST.get('form_token', '')):
-            return _render_cadastro_func("Este cadastro já foi enviado. Se precisar cadastrar outro funcionário, recarregue a página.")
-        if _eh_retry:
-            _token_ja_usado(request.POST.get('form_token', ''))  # consome o token sem rejeitar
+        if _token_ja_usado(request.POST.get('form_token', '')):
+            return _render_cadastro_func("Este cadastro já foi enviado. Se precisar cadastrar outro funcionário, recarregue a página.")  # consome o token sem rejeitar
 
         try:
             rg_limpo = request.POST.get('RG', '').replace('.', '').replace('-', '')
@@ -844,9 +877,10 @@ def cadastro_funcionario(request):
             # ==========================================
 
             # ==========================================
-            # 2.8 VALIDAÇÃO MÍNIMA DE SENHA
+            # 2.8 VALIDAÇÃO DE SENHA
             # ==========================================
-            if len(documento_funcionario['SENHA']) < 8:
+            senha_raw = documento_funcionario['SENHA']
+            if len(senha_raw) < 8:
                 return _render_cadastro_func("A senha deve ter pelo menos 8 caracteres.")
             # ==========================================
 
@@ -878,7 +912,7 @@ def cadastro_funcionario(request):
             documento_funcionario['DATA_NASCIMENTO'] = formatar_data_br(data_nasc_str)
             documento_funcionario['IDADE'] = idade
             documento_funcionario['FUNCAO'] = nivel
-            documento_funcionario['DATA_CADASTRO'] = datetime.now()
+            documento_funcionario['DATA_CADASTRO'] = datetime.now(timezone.utc)
             
             # Removemos a senha e o NIVEL_ACESSO temporário antes de enviar para o MongoDB
             del documento_funcionario['SENHA']
@@ -948,7 +982,7 @@ def busca_atualiza_funcionario(request):
             # formulário seja forjado para editar um CPF diferente do buscado.
             request.session['cpf_editando'] = cpf_limpo
 
-            contexto = {'funcionario': funcionario, 'form_token': _gerar_form_token()}
+            contexto = {'funcionario': funcionario, 'form_token': _gerar_form_token(), 'cargo': _cargo_usuario(request.user)}
 
             # Se for HTMX, manda só o formulário de edição
             if request.headers.get('HX-Request'):
@@ -1001,18 +1035,15 @@ def salva_edicao_funcionario(request):
         }
 
     if request.method == 'POST':
-        _eh_retry = request.headers.get('X-Auto-Retry') == 'true'
-        if not _eh_retry and _form_ja_em_processamento(request, 'salva_edicao_funcionario'):
+        if _form_ja_em_processamento(request, 'salva_edicao_funcionario'):
             messages.warning(request, "Já recebemos uma solicitação recente. Evite enviar mais de uma vez.")
             request.session['erro_edicao_funcionario'] = _dados_para_repor(request)
             return redirect('salva_edicao_funcionario')
 
-        if not _eh_retry and _token_ja_usado(request.POST.get('form_token', '')):
+        if _token_ja_usado(request.POST.get('form_token', '')):
             messages.warning(request, "Esta edição já foi enviada. Se precisar editar novamente, refaça a busca.")
             request.session['erro_edicao_funcionario'] = _dados_para_repor(request)
             return redirect('salva_edicao_funcionario')
-        if _eh_retry:
-            _token_ja_usado(request.POST.get('form_token', ''))
 
         cpf_original = request.POST.get('CPF_ORIGINAL', '').strip()
 
@@ -1025,15 +1056,18 @@ def salva_edicao_funcionario(request):
             return redirect('busca_atualiza_funcionario')
 
         # Supervisor não pode editar outro supervisor ou gerente geral.
+        # Gerente Geral não pode editar outro Gerente Geral.
         cargo_editor = _cargo_usuario(request.user)
-        if cargo_editor == 'SUPERVISOR':
-            try:
-                usuario_alvo_check = User.objects.get(username=cpf_autorizado)
-                if usuario_alvo_check.is_staff or usuario_alvo_check.is_superuser:
-                    messages.error(request, "Supervisores não podem editar outros supervisores ou o Gerente Geral.")
-                    return redirect('zona_admin')
-            except User.DoesNotExist:
-                pass
+        try:
+            usuario_alvo_check = User.objects.get(username=cpf_autorizado)
+            if cargo_editor == 'SUPERVISOR' and (usuario_alvo_check.is_staff or usuario_alvo_check.is_superuser):
+                messages.error(request, "Supervisores não podem editar outros supervisores ou o Gerente Geral.")
+                return redirect('zona_admin')
+            if cargo_editor == 'GERENTE_GERAL' and usuario_alvo_check.is_superuser:
+                messages.error(request, "Não é possível editar outro Gerente Geral.")
+                return redirect('zona_admin')
+        except User.DoesNotExist:
+            pass
 
         # 1. COLETA E LIMPEZA INICIAL DOS DADOS
         nome_novo = request.POST.get('NOME', '').strip()
@@ -1100,13 +1134,14 @@ def salva_edicao_funcionario(request):
         # ==========================================
 
         # ==========================================
-        # 2.8 VALIDAÇÃO MÍNIMA DE SENHA
+        # 2.8 VALIDAÇÃO DE SENHA
         # ==========================================
         nova_senha_digitada = request.POST.get('SENHA', '')
-        if nova_senha_digitada.strip() and len(nova_senha_digitada.strip()) < 8:
-            messages.warning(request, "A senha deve ter pelo menos 8 caracteres.")
-            request.session['erro_edicao_funcionario'] = _dados_para_repor(request)
-            return redirect('salva_edicao_funcionario')
+        if nova_senha_digitada.strip():
+            if len(nova_senha_digitada.strip()) < 8:
+                messages.warning(request, "A senha deve ter pelo menos 8 caracteres.")
+                request.session['erro_edicao_funcionario'] = _dados_para_repor(request)
+                return redirect('salva_edicao_funcionario')
         # ==========================================
 
         # Só trava contra duplo submit agora que passamos por todas as validações.
@@ -1150,7 +1185,7 @@ def salva_edicao_funcionario(request):
 
         # Reutiliza a senha já validada acima — evita re-leitura do POST.
         if nova_senha_digitada.strip():
-            usuario_django.set_password(nova_senha_digitada)
+            usuario_django.set_password(nova_senha_digitada.strip())
 
         usuario_django.save()
 
@@ -1170,7 +1205,10 @@ def salva_edicao_funcionario(request):
                     "CRÍTICO: falha ao fazer rollback do Django após erro no MongoDB "
                     "— estados divergentes para CPF=%s", cpf_original
                 )
-            raise
+            logger.exception("Erro ao salvar edição de funcionário CPF=%s no MongoDB", cpf_original)
+            messages.error(request, "Erro ao salvar no banco de dados. Tente novamente.")
+            request.session['erro_edicao_funcionario'] = _dados_para_repor(request)
+            return redirect('salva_edicao_funcionario')
 
         if resultado_mongo.matched_count == 0:
             # Documento não encontrado no Mongo — reverte Django para evitar divergência.
@@ -1200,7 +1238,7 @@ def salva_edicao_funcionario(request):
     # Retorno adequado para HTMX ou acesso direto (GET, ou após o redirect acima)
     dados_repostos = request.session.pop('erro_edicao_funcionario', None)
     if dados_repostos:
-        contexto_erro = {'funcionario': dados_repostos, 'form_token': _gerar_form_token()}
+        contexto_erro = {'funcionario': dados_repostos, 'form_token': _gerar_form_token(), 'cargo': _cargo_usuario(request.user)}
         if request.headers.get('HX-Request'):
             return render(request, 'edita_funcionario.html', contexto_erro)
         return render(request, 'index.html', {'template_meio': 'edita_funcionario.html', **contexto_erro})
@@ -1227,14 +1265,11 @@ def cadastro_obras(request):
             request.session['erro_cadastro_obras'] = request.POST.dict()
             return redirect('Cadastro-Obras')
 
-        _eh_retry = request.headers.get('X-Auto-Retry') == 'true'
-        if not _eh_retry and _form_ja_em_processamento(request, 'cadastro_obras'):
+        if _form_ja_em_processamento(request, 'cadastro_obras'):
             return _render_cadastro("Já recebemos uma solicitação recente. Evite enviar mais de uma vez.")
 
-        if not _eh_retry and _token_ja_usado(request.POST.get('form_token', '')):
+        if _token_ja_usado(request.POST.get('form_token', '')):
             return _render_cadastro("Este cadastro já foi enviado. Se precisar cadastrar outra obra, recarregue a página.")
-        if _eh_retry:
-            _token_ja_usado(request.POST.get('form_token', ''))
 
         # Coleta fora do try para que erros de validação nunca sejam engolidos pelo except externo
         id_obra_manual = request.POST.get('ID_OBRA_MANUAL', '').strip()
@@ -1306,7 +1341,7 @@ def cadastro_obras(request):
                 return _render_cadastro("A Data de Finalização deve ser posterior à Data de Início.")
 
         # Só trava contra duplo submit agora que a validação passou.
-        _marcar_form_em_processamento(request, 'cadastro_obras', segundos=5)
+        _marcar_form_em_processamento(request, 'cadastro_obras', segundos=12)
 
         try:
             # 4. UPLOAD MÚLTIPLO (Cloudinary)
@@ -1334,25 +1369,37 @@ def cadastro_obras(request):
 
             # Padronização da Empresa para a Planilha
             empresa_completa = f"{nome_empresa.upper()} - CNPJ - {cnpj_empresa}"
-            agora = datetime.now()
+            agora = datetime.now(timezone.utc)
             ano_atual = pegar_ano_google()
 
             # ==========================================
             # 6. GERAÇÃO DE ID + SALVAMENTO ATÔMICO
             # ==========================================
-            # O número usado é sempre recalculado a partir da contagem real de obras do
-            # ano no momento da tentativa — por isso não fica "buraco" na numeração quando
-            # uma obra é excluída. Um índice único em ID_OBRA garante que, se duas
-            # requisições colidirem no mesmo número ao mesmo tempo, o MongoDB rejeita a
-            # segunda inserção (DuplicateKeyError) e o código recalcula e tenta de novo
-            # automaticamente, sem nunca duplicar um ID.
+            # O número usado é o maior prefixo numérico existente para o ano + 1.
+            # Usar max em vez de count garante que deleções não-finais não colidam:
+            # se obras 1-3 existem e obra 2 é deletada, count=2 tentaria "32026" (já
+            # existe), mas max=3 gera "42026" corretamente. Índice único em ID_OBRA
+            # rejeita colisão de dois requests simultâneos; o retry recalcula max e
+            # tenta o próximo número automaticamente.
             resultado = None
             id_obra_gerado = id_obra_manual or None
 
+            sufixo_len = len(str(ano_atual))
             for _tentativa in range(10):
                 if not id_obra_manual:
-                    contagem_ano = colecao.count_documents({"ID_OBRA": {"$regex": f"{ano_atual}$"}})
-                    id_obra_gerado = f"{contagem_ano + 1}{ano_atual}"
+                    # Usa o maior prefixo numérico do ano (não count) para tolerar deleções
+                    # não-finais: se obras 1-3 existem e obra 2 é deletada, count=2 geraria
+                    # "32026" que já existe; max=3 gera "42026" corretamente.
+                    res_max = list(colecao.aggregate([
+                        {"$match": {"ID_OBRA": {"$regex": f"^\\d+{ano_atual}$"}}},
+                        {"$project": {"num": {"$toInt": {"$substr": [
+                            "$ID_OBRA", 0,
+                            {"$subtract": [{"$strLenCP": "$ID_OBRA"}, sufixo_len]}
+                        ]}}}},
+                        {"$group": {"_id": None, "max_num": {"$max": "$num"}}},
+                    ]))
+                    proximo_num = (res_max[0]["max_num"] + 1) if res_max else 1
+                    id_obra_gerado = f"{proximo_num}{ano_atual}"
 
                 nova_obra = {
                     'ID_OBRA': id_obra_gerado,
@@ -1401,11 +1448,10 @@ def cadastro_obras(request):
 
             # 8. SALVAR NO GOOGLE SHEETS (em segundo plano: a planilha é só espelhamento
             # best-effort e não deve atrasar a resposta ao usuário)
-            if resultado.inserted_id:
-                _disparar_em_background(salvar_no_google_sheets, nova_obra)
-                _bump_cache_obras()
-                messages.success(request, f"Obra {id_obra_gerado} salva com sucesso.")
-                return redirect('Cadastro-Obras')
+            _disparar_em_background(salvar_no_google_sheets, {k: v for k, v in nova_obra.items() if k != '_id'})
+            _bump_cache_obras()
+            messages.success(request, f"Obra {id_obra_gerado} salva com sucesso.")
+            return redirect('Cadastro-Obras')
 
         except Exception:
             logger.exception("Erro ao cadastrar obra")
@@ -1477,14 +1523,11 @@ def salva_edicao_obra(request):
             request.session['erro_edicao_obra'] = request.POST.dict()
             return redirect('salva_edicao_obra')
 
-        _eh_retry = request.headers.get('X-Auto-Retry') == 'true'
-        if not _eh_retry and _form_ja_em_processamento(request, 'salva_edicao_obra'):
+        if _form_ja_em_processamento(request, 'salva_edicao_obra'):
             return _render_edicao("Já recebemos uma solicitação recente. Evite enviar mais de uma vez.")
 
-        if not _eh_retry and _token_ja_usado(request.POST.get('form_token', '')):
+        if _token_ja_usado(request.POST.get('form_token', '')):
             return _render_edicao("Esta edição já foi enviada. Se precisar editar novamente, refaça a busca.")
-        if _eh_retry:
-            _token_ja_usado(request.POST.get('form_token', ''))
 
         # Coleta fora do try para que erros de validação nunca sejam engolidos pelo except externo
         id_obra = request.POST.get('ID_OBRA', '').strip()
@@ -1514,6 +1557,15 @@ def salva_edicao_obra(request):
 
         if len(fotos_novas_arquivos) > MAX_FOTOS_POR_ENVIO:
             return _render_edicao(f"Envie no máximo {MAX_FOTOS_POR_ENVIO} fotos por vez.")
+
+        if fotos_novas_arquivos:
+            obra_atual = colecao_obras.find_one({'ID_OBRA': id_obra}, {'GALERIA': 1})
+            galeria_atual = obra_atual.get('GALERIA', []) if obra_atual else []
+            if len(galeria_atual) + len(fotos_novas_arquivos) > MAX_FOTOS_POR_ENVIO:
+                return _render_edicao(
+                    f"A galeria já possui {len(galeria_atual)} foto(s). "
+                    f"O limite é {MAX_FOTOS_POR_ENVIO} fotos no total."
+                )
 
         for foto in fotos_novas_arquivos:
             erro_foto = _validar_foto(foto)
@@ -1558,14 +1610,14 @@ def salva_edicao_obra(request):
             return _render_edicao(f"Obra {id_obra} não encontrada. Refaça a busca.")
 
         # Trava contra duplo submit só depois da validação de existência.
-        _marcar_form_em_processamento(request, 'salva_edicao_obra', segundos=5)
+        _marcar_form_em_processamento(request, 'salva_edicao_obra', segundos=12)
 
         erro_foto = False
         resultado_update = None
         try:
             # 4. PREPARAÇÃO DO DICIONÁRIO DE ATUALIZAÇÃO (Campos de Texto)
             empresa_completa = f"{nome_empresa.upper()} - CNPJ - {cnpj_empresa}"
-            agora_edicao = datetime.now()
+            agora_edicao = datetime.now(timezone.utc)
 
             dados_atualizados = {
                 'TIPO_OBRA': tipo_obra.upper(),
@@ -1590,8 +1642,9 @@ def salva_edicao_obra(request):
             # 6. PROCESSAMENTO DAS NOVAS FOTOS (Se houver)
             # ==========================================
             urls_novas = []
+            registros_historico = []
+            public_ids_novos = []
             if fotos_novas_arquivos:
-                public_ids_novos = []
                 try:
                     for foto in fotos_novas_arquivos:
                         resultado_upload = _upload_com_retry(foto)
@@ -1614,7 +1667,7 @@ def salva_edicao_obra(request):
                             'DATA_REGISTRO': data_registro_br,
                             'TIMESTAMP': agora_edicao
                         })
-                    colecao_historico.insert_many(registros_historico)
+                    # insert_many ocorre abaixo, após update_one confirmado.
 
                 except Exception:
                     logger.exception("Erro ao processar imagens da obra")
@@ -1638,12 +1691,22 @@ def salva_edicao_obra(request):
             resultado_update = colecao.update_one({'ID_OBRA': id_obra}, {'$set': dados_atualizados})
 
             if resultado_update.matched_count > 0:
+                # Cache bumped aqui, antes do $push, para garantir invalidação
+                # mesmo que o upload das fotos novas lance uma exceção.
+                _bump_cache_obras()
+
                 # Update 2: Adiciona as novas URLs ao Array de Galeria ($push)
                 if urls_novas:
                     colecao.update_one(
                         {'ID_OBRA': id_obra},
                         {'$push': {'GALERIA': {'$each': urls_novas}}}
                     )
+                    # Timelapse inserido só após update confirmado, evitando registros órfãos.
+                    if registros_historico:
+                        try:
+                            colecao_historico.insert_many(registros_historico)
+                        except Exception:
+                            logger.exception("Erro ao registrar timelapse da obra %s", id_obra)
 
                 # ==========================================
                 # 8. ATUALIZAÇÃO NO GOOGLE SHEETS (em segundo plano)
@@ -1651,7 +1714,6 @@ def salva_edicao_obra(request):
                 dados_para_sheets = dados_atualizados.copy()
                 dados_para_sheets['ID_OBRA'] = id_obra
                 _disparar_em_background(atualizar_no_google_sheets, dados_para_sheets)
-                _bump_cache_obras()
 
         except Exception:
             logger.exception("Erro crítico ao salvar edição de obra")
@@ -1665,6 +1727,13 @@ def salva_edicao_obra(request):
         # devem ficar dentro de um except amplo (ver CLAUDE.md).
         if resultado_update is None or resultado_update.matched_count == 0:
             # A obra existia no find_one acima mas sumiu antes do update (deleção concorrente).
+            # Limpa uploads já feitos — sem documento salvo, ficam órfãos no Cloudinary.
+            for pid in public_ids_novos:
+                if pid:
+                    try:
+                        cloudinary.uploader.destroy(pid)
+                    except Exception:
+                        logger.warning("Falha ao limpar foto órfã do Cloudinary após matched_count=0: %s", pid)
             messages.error(request, f"Obra {id_obra} não encontrada ao salvar. Refaça a busca.")
             return redirect('salva_edicao_obra')
 
@@ -1693,8 +1762,6 @@ def lista_obras(request):
     # Resultado fica em cache por CACHE_TTL_SEGUNDOS, invalidado automaticamente a cada
     # cadastro/edição de obra (via _bump_cache_obras), para não reler o Mongo a cada visita.
     pagina_num = request.GET.get('pagina', 1)
-    TAMANHO_PAGINA = 12
-    CACHE_TTL_SEGUNDOS = 120
 
     try:
         pagina_num = int(pagina_num)
@@ -1710,22 +1777,16 @@ def lista_obras(request):
 
     if contexto is None:
         total_obras = colecao_obras.count_documents({})
-        total_paginas = max(1, -(-total_obras // TAMANHO_PAGINA))
+        total_paginas = max(1, -(-total_obras // _OBRAS_POR_PAGINA_PUBLICA))
         pagina_num = max(1, min(pagina_num, total_paginas))
         # Atualiza a chave para o valor real após clamp, garantindo hit em próximo acesso.
         chave_cache = f'lista_obras_v{versao_cache}_p{pagina_num}'
 
-        _CAMPOS_LISTA_OBRAS = {
-            'ID_OBRA': 1, 'TIPO_OBRA': 1, 'VALOR_OBRA': 1, 'SITUACAO': 1,
-            'EMPRESA_CONTRATADA': 1, 'TIPO_EXECUCAO': 1, 'ENDERECO': 1,
-            'DATA_INICIO': 1, 'CONCLUSAO_PREVISTA': 1, 'DATA_FINALIZACAO': 1,
-            'URL_FOTO': 1, '_id': 0,
-        }
         obras = list(
             colecao_obras.find({}, _CAMPOS_LISTA_OBRAS)
             .sort('TIMESTAMP_CADASTRO', -1)
-            .skip((pagina_num - 1) * TAMANHO_PAGINA)
-            .limit(TAMANHO_PAGINA)
+            .skip((pagina_num - 1) * _OBRAS_POR_PAGINA_PUBLICA)
+            .limit(_OBRAS_POR_PAGINA_PUBLICA)
         )
         for o in obras:
             o['VALOR_OBRA'] = _float_para_br(o.get('VALOR_OBRA', 0))
@@ -1737,7 +1798,7 @@ def lista_obras(request):
             'tem_anterior': pagina_num > 1,
             'tem_proxima': pagina_num < total_paginas,
         }
-        cache.set(chave_cache, contexto, CACHE_TTL_SEGUNDOS)
+        cache.set(chave_cache, contexto, _CACHE_TTL_LISTA_OBRAS)
 
     if request.headers.get('HX-Request'):
         return render(request, 'lista_obras.html', contexto)
@@ -1883,13 +1944,22 @@ def _extrair_public_id_cloudinary(url):
         partes = url.split('/upload/')
         if len(partes) < 2:
             return None
-        caminho = partes[1]
-        # Remove o prefixo de versão (v{digits}/)
-        if caminho.startswith('v') and '/' in caminho:
-            _, caminho = caminho.split('/', 1)
-        # Remove a extensão
-        caminho = caminho.rsplit('.', 1)[0]
-        return caminho
+        # Transformações Cloudinary: segmentos com vírgula (c_fill,w_300) ou
+        # prefixo curto de 1-3 letras seguido de _ (c_, w_, h_, q_, f_, t_, etc.)
+        # Nomes de pasta não seguem esse padrão — a regex é conservadora.
+        segmentos = partes[1].split('/')
+        inicio = 0
+        for i, seg in enumerate(segmentos):
+            if _RE_CLOUDINARY_VERSAO.match(seg):
+                inicio = i + 1
+                break
+            if _RE_CLOUDINARY_TRANSFORM.search(seg):
+                inicio = i + 1
+            else:
+                inicio = i
+                break
+        public_id = '/'.join(segmentos[inicio:]).rsplit('.', 1)[0]
+        return public_id or None
     except Exception:
         return None
 
@@ -1901,7 +1971,6 @@ def alterar_cargo_funcionario(request):
         messages.error(request, "Acesso restrito ao Gerente Geral.")
         return redirect('zona_admin')
     if request.method != 'POST':
-        from django.http import HttpResponseNotAllowed
         return HttpResponseNotAllowed(['POST'])
 
     form_token = request.POST.get('form_token', '').strip()
@@ -1936,7 +2005,7 @@ def alterar_cargo_funcionario(request):
     usuario_alvo.save(update_fields=['is_staff'])
 
     try:
-        colecao_funcionarios.update_one({'CPF': cpf}, {'$set': {'FUNCAO': novo_cargo}})
+        resultado_cargo = colecao_funcionarios.update_one({'CPF': cpf}, {'$set': {'FUNCAO': novo_cargo}})
     except Exception:
         try:
             usuario_alvo.is_staff = is_staff_original
@@ -1947,13 +2016,22 @@ def alterar_cargo_funcionario(request):
         messages.error(request, "Erro ao alterar cargo. Tente novamente.")
         return redirect('zona_admin')
 
+    if resultado_cargo.matched_count == 0:
+        logger.warning(
+            "alterar_cargo: sem documento Mongo para CPF=%s — is_staff atualizado no Django, "
+            "FUNCAO não encontrada no Mongo (usuário criado fora do fluxo normal?)", cpf
+        )
+
     nome_func = usuario_alvo.first_name or cpf
     cargo_label = 'Supervisor' if novo_cargo == 'SUPERVISOR' else 'Funcionário Comum'
     messages.success(request, f"Cargo de {nome_func} alterado para {cargo_label}.")
+    logger.warning(
+        "Cargo alterado: CPF=%s (%s) → %s | executado por %s (IP: %s)",
+        cpf, nome_func, cargo_label, request.user.username, _ip_do_cliente(request)
+    )
 
-    from django.http import HttpResponse as _HttpResponse
     if request.headers.get('HX-Request'):
-        resp = _HttpResponse(status=204)
+        resp = HttpResponse(status=204)
         resp['HX-Redirect'] = reverse('zona_admin') + '?aba=funcionarios'
         return resp
     return redirect(reverse('zona_admin') + '?aba=funcionarios')
@@ -1966,7 +2044,6 @@ def deletar_funcionario(request):
         messages.error(request, "Acesso restrito ao Gerente Geral.")
         return redirect('zona_admin')
     if request.method != 'POST':
-        from django.http import HttpResponseNotAllowed
         return HttpResponseNotAllowed(['POST'])
 
     form_token = request.POST.get('form_token', '').strip()
@@ -1995,14 +2072,23 @@ def deletar_funcionario(request):
 
     nome = usuario_alvo.first_name or cpf
 
+    # Deleta o Django User primeiro — se falhar, o Mongo não é tocado.
+    # Se o Mongo falhar depois, o usuário não consegue mais logar (Django User
+    # já foi removido), deixando um documento órfão no Mongo em vez do contrário
+    # (usuário ativo sem perfil), que seria mais grave.
+    try:
+        usuario_alvo.delete()
+    except Exception:
+        logger.exception("Erro ao deletar Django User para CPF=%s", cpf)
+        messages.error(request, "Erro ao remover funcionário. Tente novamente.")
+        return redirect(reverse('zona_admin') + '?aba=funcionarios')
+
     try:
         colecao_funcionarios.delete_one({'CPF': cpf})
     except Exception:
-        logger.exception("Erro ao deletar funcionário do MongoDB CPF=%s", cpf)
-        messages.error(request, "Erro ao remover dados do funcionário. Tente novamente.")
+        logger.exception("Erro ao deletar documento Mongo para CPF=%s — Django User já removido", cpf)
+        messages.error(request, "O acesso do funcionário foi revogado, mas houve erro ao remover os dados de perfil. Contate o suporte.")
         return redirect(reverse('zona_admin') + '?aba=funcionarios')
-
-    usuario_alvo.delete()
 
     logger.warning(
         "Funcionário %s (CPF=%s) excluído por %s (IP: %s)",
@@ -2010,15 +2096,11 @@ def deletar_funcionario(request):
     )
     messages.success(request, f"Funcionário {nome} excluído com sucesso.")
 
-    from django.http import HttpResponse as _HttpResponse
     if request.headers.get('HX-Request'):
-        resp = _HttpResponse(status=204)
+        resp = HttpResponse(status=204)
         resp['HX-Redirect'] = reverse('zona_admin') + '?aba=funcionarios'
         return resp
     return redirect(reverse('zona_admin') + '?aba=funcionarios')
-
-
-_OBRAS_POR_PAGINA_ADMIN = 10
 
 
 def zona_admin(request):
@@ -2038,7 +2120,13 @@ def zona_admin(request):
     except (ValueError, TypeError):
         pagina = 1
 
-    ctx = {'aba': aba, 'cargo': cargo, 'form_token': _gerar_form_token()}
+    ctx = {
+        'aba': aba,
+        'cargo': cargo,
+        'form_token_obra': _gerar_form_token(),
+        'form_token_deletar_func': _gerar_form_token(),
+        'form_token_cargo': _gerar_form_token(),
+    }
 
     if aba == 'obras':
         total = colecao_obras.count_documents({})
@@ -2057,7 +2145,7 @@ def zona_admin(request):
         funcionarios = list(colecao_funcionarios.find(
             {},
             {'NOME': 1, 'CPF': 1, 'FUNCAO': 1, 'DATA_CADASTRO': 1, '_id': 0}
-        ).sort('DATA_CADASTRO', -1))
+        ).sort('DATA_CADASTRO', -1).limit(500))
 
         # Enriquece com is_staff/is_superuser do Django para exibir cargo real
         cpfs = [f.get('CPF') for f in funcionarios if f.get('CPF')]
@@ -2070,6 +2158,11 @@ def zona_admin(request):
                 func['cargo_func'] = 'SUPERVISOR'
             else:
                 func['cargo_func'] = 'COMUM'
+            cpf_raw = func.get('CPF', '')
+            if len(cpf_raw) == 11 and cpf_raw.isdigit():
+                func['CPF_MASCARADO'] = f"{cpf_raw[:2]}*.***.***-**"
+            else:
+                func['CPF_MASCARADO'] = '***.***.***-**'
 
         ctx['funcionarios'] = funcionarios
 
@@ -2085,17 +2178,13 @@ def deletar_obra(request):
         messages.error(request, "Acesso restrito a supervisores.")
         return redirect('inicio')
     if request.method != 'POST':
-        from django.http import HttpResponseNotAllowed
         return HttpResponseNotAllowed(['POST'])
 
     # Guard de token de idempotência — evita duplo-submit do modal de confirmação
     form_token = request.POST.get('form_token', '').strip()
-    _eh_retry = request.headers.get('X-Auto-Retry') == 'true'
-    if not _eh_retry and _token_ja_usado(form_token):
+    if _token_ja_usado(form_token):
         messages.error(request, "Ação já processada ou token inválido.")
         return redirect('zona_admin')
-    if _eh_retry:
-        _token_ja_usado(form_token)
 
     id_obra = request.POST.get('id_obra', '').strip()
     if not id_obra:
@@ -2127,7 +2216,12 @@ def deletar_obra(request):
     _disparar_em_background(deletar_do_google_sheets, id_obra)
 
     # 4. Deletar a obra do MongoDB
-    colecao_obras.delete_one({'ID_OBRA': id_obra})
+    try:
+        colecao_obras.delete_one({'ID_OBRA': id_obra})
+    except Exception:
+        logger.exception("Erro ao deletar obra %s do MongoDB", id_obra)
+        messages.error(request, "Erro ao excluir a obra. Tente novamente.")
+        return redirect('zona_admin')
     _bump_cache_obras()
 
     logger.warning(
@@ -2136,7 +2230,6 @@ def deletar_obra(request):
     )
     messages.success(request, f"Obra {id_obra} excluída com sucesso.")
 
-    from django.http import HttpResponse
     if request.headers.get('HX-Request'):
         response = HttpResponse(status=204)
         response['HX-Redirect'] = reverse('zona_admin')

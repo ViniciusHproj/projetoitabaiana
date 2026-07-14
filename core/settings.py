@@ -14,8 +14,6 @@ from pathlib import Path
 import os
 from dotenv import load_dotenv
 import cloudinary
-import cloudinary.uploader
-import cloudinary.api
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -26,8 +24,11 @@ load_dotenv(BASE_DIR / '.env')
 _google_creds_json = os.environ.get('GOOGLE_CREDENTIALS_JSON')
 if _google_creds_json:
     _creds_path = BASE_DIR / os.environ.get('GOOGLE_SHEETS_CREDENTIALS_FILE', 'credenciais.json')
-    if not _creds_path.exists():
-        _creds_path.write_text(_google_creds_json, encoding='utf-8')
+    # Sempre re-escreve para garantir que a env var e o arquivo estejam em sync.
+    # O guard `if not exists` anterior impedia que credenciais rotacionadas no Render
+    # sobrescrevessem o arquivo stale em containers que sobrevivem ao restart.
+    _creds_path.write_text(_google_creds_json, encoding='utf-8')
+    _creds_path.chmod(0o600)
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
@@ -125,6 +126,8 @@ AUTH_PASSWORD_VALIDATORS = [
 # Internationalization
 # https://docs.djangoproject.com/en/6.0/topics/i18n/
 
+DEFAULT_AUTO_FIELD = 'django.db.models.AutoField'
+
 LANGUAGE_CODE = 'pt-br'
 
 TIME_ZONE = 'UTC'
@@ -148,7 +151,7 @@ STORAGES = {
 LOGIN_REDIRECT_URL = 'inicio'
 
 # Quando deslogar, também volta para o 'inicio'
-LOGOUT_REDIRECT_URL = 'inicio'
+LOGOUT_REDIRECT_URL = 'login'
 
 # Onde fica a página de login
 LOGIN_URL = 'login'

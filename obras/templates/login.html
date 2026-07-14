@@ -83,8 +83,6 @@
           Realize o login para acessar o <strong>Cadastro de Funcionários</strong>.
         {% elif "atualizar-funcionario" in request.GET.next %}
           Realize o login para <strong>Editar Funcionários</strong>.
-        {% elif "zona-exclusao" in request.GET.next %}
-          Realize o login para acessar a <strong>Zona Administrativa</strong>.
         {% elif "obra" in request.GET.next %}
           Realize o login para acessar a área de <strong>Obras</strong>.
         {% else %}
@@ -107,18 +105,6 @@
     </div>
     {% endif %}
 
-    {% if messages %}
-      {% for message in messages %}
-        {% if message.tags == 'error' %}
-        <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:14px 16px;margin-bottom:20px;text-align:left;display:flex;gap:12px;align-items:flex-start;">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#dc2626" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;margin-top:1px;">
-            <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
-          </svg>
-          <div style="font-size:.875rem;color:#991b1b;line-height:1.5;">{{ message }}</div>
-        </div>
-        {% endif %}
-      {% endfor %}
-    {% endif %}
     {% include 'partial_messages.html' %}
 
     <form method="post" action="{{ request.get_full_path }}" id="form-login">

@@ -26,7 +26,10 @@ from django.contrib.auth.signals import user_logged_in
 from django.test import Client, RequestFactory, TestCase
 from pymongo import MongoClient
 
+from unittest.mock import MagicMock
+
 from obras import views as obras_views
+from obras.utils import formatar_data_br, preparar_data_para_input
 from obras.views import (
     _extrair_public_id_cloudinary,
     _gerar_form_token,
@@ -652,14 +655,22 @@ class CadastroFuncionarioValidacaoTestCase(MongoTesteBase):
         self.assertFalse(self._funcionario_criado())
 
     def test_supervisor_menor_de_18_anos_e_rejeitado(self):
-        from datetime import date, timedelta
-        menor = (date.today() - timedelta(days=17 * 365)).strftime("%Y-%m-%d")
+        from datetime import date
+        hoje = date.today()
+        try:
+            menor = hoje.replace(year=hoje.year - 17).strftime("%Y-%m-%d")
+        except ValueError:
+            menor = hoje.replace(year=hoje.year - 17, day=28).strftime("%Y-%m-%d")
         self._postar(NIVEL_ACESSO="SUPERVISOR", DATA_NASCIMENTO=menor)
         self.assertFalse(self._funcionario_criado())
 
     def test_funcionario_comum_menor_de_16_anos_e_rejeitado(self):
-        from datetime import date, timedelta
-        menor = (date.today() - timedelta(days=15 * 365)).strftime("%Y-%m-%d")
+        from datetime import date
+        hoje = date.today()
+        try:
+            menor = hoje.replace(year=hoje.year - 15).strftime("%Y-%m-%d")
+        except ValueError:
+            menor = hoje.replace(year=hoje.year - 15, day=28).strftime("%Y-%m-%d")
         self._postar(NIVEL_ACESSO="COMUM", DATA_NASCIMENTO=menor)
         self.assertFalse(self._funcionario_criado())
 
@@ -686,13 +697,16 @@ class CadastroFuncionarioValidacaoTestCase(MongoTesteBase):
         self._postar(SENHA="Ab1!")
         self.assertFalse(self._funcionario_criado())
 
-    def test_senha_so_numeros_e_rejeitada(self):
-        self._postar(SENHA="12345678")
-        self.assertFalse(self._funcionario_criado())
+    def test_senha_forte_e_aceita(self):
+        """Senha que passa todos os validators (comprimento, complexidade, não-numérica) deve ser aceita."""
+        self._postar(SENHA=SENHA_FORTE)
+        self.assertTrue(self._funcionario_criado())
 
-    def test_senha_comum_e_rejeitada(self):
-        self._postar(SENHA="password123")
-        self.assertFalse(self._funcionario_criado())
+    def test_senha_so_numeros_e_aceita(self):
+        """Senha somente numérica com 8+ chars deve ser aceita — validate_password() foi
+        removido por design: admins definem senhas, não o próprio usuário."""
+        self._postar(SENHA="12345678")
+        self.assertTrue(self._funcionario_criado())
 
 
 class EdicaoFuncionarioValidacaoTestCase(MongoTesteBase):
@@ -771,14 +785,22 @@ class EdicaoFuncionarioValidacaoTestCase(MongoTesteBase):
         self.assertFalse(self._funcionario_atualizado("Carlos da Silva Editado"))
 
     def test_supervisor_menor_de_18_anos_e_rejeitado(self):
-        from datetime import date, timedelta
-        menor = (date.today() - timedelta(days=17 * 365)).strftime("%Y-%m-%d")
+        from datetime import date
+        hoje = date.today()
+        try:
+            menor = hoje.replace(year=hoje.year - 17).strftime("%Y-%m-%d")
+        except ValueError:
+            menor = hoje.replace(year=hoje.year - 17, day=28).strftime("%Y-%m-%d")
         self._postar(FUNCAO="SUPERVISOR", DATA_NASCIMENTO=menor)
         self.assertFalse(self._funcionario_atualizado("Carlos da Silva Editado"))
 
     def test_comum_menor_de_16_anos_e_rejeitado(self):
-        from datetime import date, timedelta
-        menor = (date.today() - timedelta(days=15 * 365)).strftime("%Y-%m-%d")
+        from datetime import date
+        hoje = date.today()
+        try:
+            menor = hoje.replace(year=hoje.year - 15).strftime("%Y-%m-%d")
+        except ValueError:
+            menor = hoje.replace(year=hoje.year - 15, day=28).strftime("%Y-%m-%d")
         self._postar(FUNCAO="COMUM", DATA_NASCIMENTO=menor)
         self.assertFalse(self._funcionario_atualizado("Carlos da Silva Editado"))
 
@@ -1171,6 +1193,46 @@ class ListaObrasPublicaTestCase(MongoTesteBase):
     def test_paginacao_pagina_negativa_usa_pagina_1(self):
         resposta = self.client.get("/lista-obras/?pagina=-5")
         self.assertEqual(resposta.status_code, 200)
+
+    def test_cache_e_invalidado_apos_nova_obra(self):
+        """_bump_cache_obras() deve fazer obras novas aparecerem imediatamente."""
+        from django.core.cache import cache as django_cache
+        from obras.views import _bump_cache_obras
+        import datetime
+        django_cache.clear()
+
+        self.colecao_obras.insert_one({
+            "ID_OBRA": "12026",
+            "TIPO_OBRA": "PAVIMENTAÇÃO",
+            "SITUACAO": "Em andamento",
+            "VALOR_OBRA": 1000.0,
+            "NOME_EMPRESA": "Empresa A",
+            "ENDERECO": "Rua A",
+            "URL_FOTO": "",
+            "TIMESTAMP_CADASTRO": datetime.datetime.now(),
+        })
+        # Primeira visita popula o cache com ID 12026
+        resposta1 = self.client.get("/lista-obras/")
+        self.assertContains(resposta1, "12026")
+
+        # Insere nova obra SEM bumpar o cache — não deve aparecer ainda
+        self.colecao_obras.insert_one({
+            "ID_OBRA": "22026",
+            "TIPO_OBRA": "CALÇADA",
+            "SITUACAO": "Em andamento",
+            "VALOR_OBRA": 500.0,
+            "NOME_EMPRESA": "Empresa B",
+            "ENDERECO": "Rua B",
+            "URL_FOTO": "",
+            "TIMESTAMP_CADASTRO": datetime.datetime.now(),
+        })
+        resposta_cache = self.client.get("/lista-obras/")
+        self.assertNotContains(resposta_cache, "22026")
+
+        # Bumpa o cache — obra nova deve aparecer na próxima requisição
+        _bump_cache_obras()
+        resposta_apos_bump = self.client.get("/lista-obras/")
+        self.assertContains(resposta_apos_bump, "22026")
 
 
 class GaleriaObraPublicaTestCase(MongoTesteBase):
@@ -1989,9 +2051,16 @@ class ZonaAdminAcessoTestCase(MongoTesteBase):
         self.assertContains(resposta, "12026")
 
     def test_zona_admin_exige_autenticacao(self):
-        """Confirma que a rota exige login."""
+        """Confirma que a rota exige login — client sem login deve ser redirecionado."""
         resposta = self.client.get("/zona-admin/")
-        self.assertFalse(self.client.session.get("_auth_user_id"))
+        self.assertIn(resposta.status_code, (301, 302))
+        self.assertIn("/login/", resposta.url)
+
+    def test_comum_nao_acessa_aba_funcionarios(self):
+        """Funcionário COMUM que tenta acessar aba=funcionarios é redirecionado de volta para zona_admin."""
+        self.client.force_login(self.comum)
+        resposta = self.client.get("/zona-admin/?aba=funcionarios")
+        self.assertRedirects(resposta, "/zona-admin/", fetch_redirect_response=False)
 
 
 # ==============================================================================
@@ -2131,3 +2200,532 @@ class DeletarObraTestCase(MongoTesteBase):
         with self.assertLogs("obras.views", level="WARNING") as cm:
             self.client.post("/deletar-obra/", {"id_obra": self.ID_OBRA_TESTE, "form_token": _gerar_form_token()})
         self.assertTrue(any(self.ID_OBRA_TESTE in line for line in cm.output))
+
+
+# ==============================================================================
+# DASHBOARD PÚBLICO
+# ==============================================================================
+
+class DashboardPublicoTestCase(MongoTesteBase):
+    """dashboard_publico é público (sem autenticação) e suporta dual-render."""
+
+    def test_acessivel_sem_autenticacao(self):
+        resposta = self.client.get("/dashboard-obras/")
+        self.assertEqual(resposta.status_code, 200)
+
+    def test_retorna_partial_em_request_htmx(self):
+        resposta = self.client.get("/dashboard-obras/", HTTP_HX_REQUEST="true")
+        self.assertEqual(resposta.status_code, 200)
+        self.assertTemplateUsed(resposta, "dashboard_obras.html")
+        self.assertTemplateNotUsed(resposta, "index.html")
+
+    def test_retorna_shell_em_acesso_direto(self):
+        resposta = self.client.get("/dashboard-obras/")
+        self.assertTemplateUsed(resposta, "index.html")
+        self.assertTemplateUsed(resposta, "dashboard_obras.html")
+
+    def test_cards_de_totais_presentes_no_contexto(self):
+        self.colecao_obras.insert_one({
+            "ID_OBRA": "12026",
+            "SITUACAO": "Em andamento",
+            "TIPO_EXECUCAO": "Nova Construção",
+            "VALOR_OBRA": 100000.0,
+            "DATA_INICIO": "01/01/2026",
+            "EMPRESA_CONTRATADA": "Empresa A",
+            "TIMESTAMP_CADASTRO": __import__("datetime").datetime.now(),
+        })
+        resposta = self.client.get("/dashboard-obras/", HTTP_HX_REQUEST="true")
+        self.assertEqual(resposta.context["total"], 1)
+        self.assertEqual(resposta.context["em_execucao"], 1)
+
+    def test_funciona_com_banco_vazio(self):
+        """Com coleção vazia, não deve lançar exceção — retorna zeros."""
+        resposta = self.client.get("/dashboard-obras/", HTTP_HX_REQUEST="true")
+        self.assertEqual(resposta.status_code, 200)
+        self.assertEqual(resposta.context["total"], 0)
+
+
+# ==============================================================================
+# SESSÃO EXPIRADA — MIDDLEWARE
+# ==============================================================================
+
+class SessaoExpiradaMiddlewareTestCase(MongoTesteBase):
+    """SessaoExpiradaMiddleware detecta cookie stale e redireciona para login."""
+
+    def test_cookie_stale_redireciona_para_login(self):
+        """Simula um cookie de sessão que não existe mais no banco."""
+        self.client.cookies["sessionid"] = "sessao_que_nao_existe_no_banco_xpto123"
+        resposta = self.client.get("/inicio/")
+        self.assertRedirects(resposta, "/login/", fetch_redirect_response=False)
+
+    def test_cookie_stale_seta_aviso_inatividade_na_sessao(self):
+        """Cookie stale deve setar aviso_login='inatividade' para exibir mensagem correta no login."""
+        self.client.cookies["sessionid"] = "cookie_stale_para_teste_aviso_xyz"
+        self.client.get("/inicio/")
+        # Após o redirect, a nova sessão deve ter o aviso
+        self.assertEqual(self.client.session.get('aviso_login'), 'inatividade')
+
+    def test_pagina_publica_com_cookie_stale_nao_redireciona(self):
+        """Visitante com cookie stale em página pública não deve ser redirecionado para login."""
+        self.client.cookies["sessionid"] = "cookie_stale_visitante_publico_abc"
+        resposta = self.client.get("/lista-obras/")
+        self.assertEqual(resposta.status_code, 200)
+        resposta2 = self.client.get("/dashboard-obras/")
+        self.assertEqual(resposta2.status_code, 200)
+
+    def test_sessao_valida_nao_e_redirecionada(self):
+        user = User.objects.create_user(
+            username=CPF_VALIDO, password=SENHA_FORTE, first_name="Joao"
+        )
+        self.client.force_login(user)
+        resposta = self.client.get("/inicio/", HTTP_HX_REQUEST="true")
+        self.assertEqual(resposta.status_code, 200)
+
+    def test_rota_login_nao_dispara_middleware(self):
+        """Acesso direto ao /login/ com cookie stale não deve causar redirect loop."""
+        self.client.cookies["sessionid"] = "cookie_invalido_xyz"
+        resposta = self.client.get("/login/")
+        # Deve renderizar normalmente, não entrar em loop de redirect
+        self.assertEqual(resposta.status_code, 200)
+
+    def test_rota_logout_nao_dispara_middleware(self):
+        """POST em /logout/ com cookie stale não deve causar redirect indevido."""
+        self.client.cookies["sessionid"] = "cookie_invalido_xyz"
+        resposta = self.client.post("/logout/")
+        # Deve redirecionar para login normalmente (logout_view), não ser interceptado
+        self.assertEqual(resposta.status_code, 302)
+
+
+# ==============================================================================
+# UPLOAD WEBP
+# ==============================================================================
+
+class UploadWebpTestCase(MongoTesteBase):
+    """Valida que arquivos WEBP são aceitos pela validação de magic bytes."""
+
+    def setUp(self):
+        super().setUp()
+        self.user = User.objects.create_user(
+            username=CPF_VALIDO, password=SENHA_FORTE, first_name="Joao Teste"
+        )
+        self.client.force_login(self.user)
+
+    def _dados_obra(self):
+        return {
+            "btn-salvar": "1",
+            "TIPO_OBRA": "PAVIMENTAÇÃO",
+            "SITUACAO": "Em andamento",
+            "TIPO_EXECUCAO": "Nova Construção",
+            "VALOR_OBRA": "1.000,00",
+            "DATA_INICIO": "2026-01-01",
+            "CONCLUSAO_PREVISTA": "2026-12-31",
+            "DATA_FINALIZACAO": "",
+            "NOME_EMPRESA": "Empresa Teste",
+            "ENDERECO": "Rua de Teste, 123",
+            "CNPJ_EMPRESA": CNPJ_VALIDO,
+            "form_token": _gerar_form_token(),
+        }
+
+    @patch("obras.views.cloudinary.uploader.upload")
+    def test_webp_valido_e_aceito(self, mock_upload):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        mock_upload.return_value = {"secure_url": "https://res.cloudinary.com/teste/foto.webp"}
+        dados = self._dados_obra()
+        arquivo = SimpleUploadedFile("foto.webp", _WEBP_MINIMO, content_type="image/webp")
+        self.client.post("/cadastro-obras/", {**dados, "FOTO_OBRA": arquivo})
+        self.assertEqual(self.colecao_obras.count_documents({}), 1)
+
+    def test_webp_com_magic_bytes_invalidos_rejeitado(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        dados = self._dados_obra()
+        conteudo_invalido = b'RIFF\x00\x00\x00\x00WEBX' + b'\x00' * 4  # WEBX em vez de WEBP
+        arquivo = SimpleUploadedFile("falso.webp", conteudo_invalido, content_type="image/webp")
+        self.client.post("/cadastro-obras/", {**dados, "FOTO_OBRA": arquivo})
+        self.assertEqual(self.colecao_obras.count_documents({}), 0)
+
+
+# ==============================================================================
+# SESSÃO ÚNICA — PATH HTMX (HX-Redirect)
+# ==============================================================================
+
+class SessaoUnicaHtmxTestCase(MongoTesteBase):
+    """Cobre o caminho HTMX do SessaoUnicaMiddleware (resposta 204 + HX-Redirect)."""
+
+    def setUp(self):
+        super().setUp()
+        self.cpf = CPF_VALIDO
+        User.objects.create_user(username=self.cpf, password=SENHA_FORTE, first_name="Joao Teste")
+
+    def test_segundo_login_derruba_sessao_htmx_com_hx_redirect(self):
+        cliente_1 = Client()
+        cliente_2 = Client()
+
+        cliente_1.post("/login/", {"username": self.cpf, "password": SENHA_FORTE})
+        cliente_2.post("/login/", {"username": self.cpf, "password": SENHA_FORTE})
+
+        # Requisição HTMX com sessão stale deve receber 204 + HX-Redirect
+        resposta = cliente_1.get("/inicio/", HTTP_HX_REQUEST="true")
+        self.assertEqual(resposta.status_code, 204)
+        self.assertIn("HX-Redirect", resposta)
+        self.assertIn("/login/", resposta["HX-Redirect"])
+
+    def test_segundo_login_derruba_sessao_normal_com_redirect(self):
+        cliente_1 = Client()
+        cliente_2 = Client()
+
+        cliente_1.post("/login/", {"username": self.cpf, "password": SENHA_FORTE})
+        cliente_2.post("/login/", {"username": self.cpf, "password": SENHA_FORTE})
+
+        # Requisição normal com sessão stale deve receber redirect 302
+        resposta = cliente_1.get("/inicio/")
+        self.assertRedirects(resposta, "/login/", fetch_redirect_response=False)
+
+
+# ==============================================================================
+# DELETAR FUNCIONÁRIO
+# ==============================================================================
+
+class DeletarFuncionarioTestCase(MongoTesteBase):
+    """Testa a view deletar_funcionario: acesso, deleção e respostas.
+
+    Nota: deletar_funcionario exige is_superuser (Gerente Geral), não apenas is_staff.
+    """
+
+    CPF_ALVO = "44455566677"
+    CPF_GERENTE = "52998224725"
+
+    def setUp(self):
+        super().setUp()
+        # Gerente Geral: único que pode deletar funcionários
+        self.gerente = User.objects.create_superuser(
+            username=self.CPF_GERENTE, password=SENHA_FORTE, first_name="Gerente"
+        )
+        # Supervisor (is_staff mas não is_superuser) — também não pode deletar
+        self.supervisor = User.objects.create_user(
+            username=CPF_VALIDO, password=SENHA_FORTE, is_staff=True, first_name="Supervisor"
+        )
+        # Funcionário alvo da deleção
+        self.alvo = User.objects.create_user(
+            username=self.CPF_ALVO, password=SENHA_FORTE, first_name="Funcionario Alvo"
+        )
+        self.colecao_funcionarios.insert_one({
+            "CPF": self.CPF_ALVO,
+            "NOME": "Funcionario Alvo",
+            "FUNCAO": "COMUM",
+        })
+
+    def _payload(self):
+        return {"cpf": self.CPF_ALVO, "form_token": _gerar_form_token()}
+
+    # --- Controle de acesso ---
+
+    def test_nao_autenticado_redireciona_para_login(self):
+        resposta = self.client.post("/deletar-funcionario/", self._payload())
+        self.assertIn("/login/", resposta.url)
+
+    def test_supervisor_nao_pode_deletar(self):
+        """is_staff sem is_superuser é bloqueado — view exige Gerente Geral."""
+        self.client.force_login(self.supervisor)
+        resposta = self.client.post("/deletar-funcionario/", self._payload())
+        # View redireciona para zona_admin com mensagem de erro
+        self.assertIn(resposta.status_code, (301, 302))
+        # Funcionário alvo não deve ter sido deletado
+        self.assertEqual(self.colecao_funcionarios.count_documents({"CPF": self.CPF_ALVO}), 1)
+        self.assertTrue(User.objects.filter(username=self.CPF_ALVO).exists())
+
+    def test_get_nao_permitido_retorna_405(self):
+        self.client.force_login(self.gerente)
+        resposta = self.client.get("/deletar-funcionario/")
+        self.assertEqual(resposta.status_code, 405)
+
+    def test_token_ausente_e_rejeitado(self):
+        self.client.force_login(self.gerente)
+        resposta = self.client.post("/deletar-funcionario/", {"cpf": self.CPF_ALVO})
+        self.assertEqual(self.colecao_funcionarios.count_documents({"CPF": self.CPF_ALVO}), 1)
+        self.assertTrue(User.objects.filter(username=self.CPF_ALVO).exists())
+
+    # --- Fluxo feliz ---
+
+    def test_gerente_deleta_funcionario(self):
+        self.client.force_login(self.gerente)
+        self.client.post("/deletar-funcionario/", self._payload())
+        self.assertEqual(self.colecao_funcionarios.count_documents({"CPF": self.CPF_ALVO}), 0)
+        self.assertFalse(User.objects.filter(username=self.CPF_ALVO).exists())
+
+    def test_resposta_htmx_tem_hx_redirect(self):
+        self.client.force_login(self.gerente)
+        resposta = self.client.post(
+            "/deletar-funcionario/",
+            self._payload(),
+            HTTP_HX_REQUEST="true",
+        )
+        self.assertEqual(resposta.status_code, 204)
+        self.assertIn("HX-Redirect", resposta)
+
+    def test_cpf_inexistente_nao_quebra(self):
+        self.client.force_login(self.gerente)
+        resposta = self.client.post(
+            "/deletar-funcionario/",
+            {"cpf": "99999999999", "form_token": _gerar_form_token()},
+        )
+        self.assertIn(resposta.status_code, (301, 302))
+
+    def test_nao_pode_deletar_outro_superusuario(self):
+        outro_gerente = User.objects.create_superuser(
+            username="00000000000", password=SENHA_FORTE, first_name="Outro Gerente"
+        )
+        self.colecao_funcionarios.insert_one({"CPF": "00000000000", "NOME": "Outro Gerente"})
+        self.client.force_login(self.gerente)
+        resposta = self.client.post(
+            "/deletar-funcionario/",
+            {"cpf": "00000000000", "form_token": _gerar_form_token()},
+        )
+        self.assertRedirects(resposta, "/zona-admin/?aba=funcionarios", fetch_redirect_response=False)
+        self.assertTrue(User.objects.filter(username="00000000000").exists())
+
+
+# ==============================================================================
+# ALTERAR CARGO DE FUNCIONÁRIO
+# ==============================================================================
+
+class AlterarCargoFuncionarioTestCase(MongoTesteBase):
+    """Testa a view alterar_cargo_funcionario: acesso, promoção, rebaixamento e guards."""
+
+    CPF_ALVO = "44455566677"
+    CPF_GERENTE = "52998224725"
+
+    def setUp(self):
+        super().setUp()
+        self.gerente = User.objects.create_superuser(
+            username=self.CPF_GERENTE, password=SENHA_FORTE, first_name="Gerente"
+        )
+        self.supervisor = User.objects.create_user(
+            username=CPF_VALIDO, password=SENHA_FORTE, is_staff=True, first_name="Supervisor"
+        )
+        self.alvo = User.objects.create_user(
+            username=self.CPF_ALVO, password=SENHA_FORTE, is_staff=False, first_name="Funcionario Alvo"
+        )
+        self.colecao_funcionarios.insert_one({
+            "CPF": self.CPF_ALVO,
+            "NOME": "Funcionario Alvo",
+            "FUNCAO": "COMUM",
+        })
+
+    def _payload(self, novo_cargo="SUPERVISOR"):
+        return {"cpf": self.CPF_ALVO, "novo_cargo": novo_cargo, "form_token": _gerar_form_token()}
+
+    # --- Controle de acesso ---
+
+    def test_nao_autenticado_redireciona_para_login(self):
+        resposta = self.client.post("/alterar-cargo/", self._payload())
+        self.assertIn("/login/", resposta.url)
+
+    def test_supervisor_nao_pode_alterar_cargo(self):
+        """is_staff sem is_superuser não pode alterar cargos."""
+        self.client.force_login(self.supervisor)
+        resposta = self.client.post("/alterar-cargo/", self._payload())
+        self.assertIn(resposta.status_code, (301, 302))
+        self.alvo.refresh_from_db()
+        self.assertFalse(self.alvo.is_staff)
+
+    def test_get_nao_permitido_retorna_405(self):
+        self.client.force_login(self.gerente)
+        resposta = self.client.get("/alterar-cargo/")
+        self.assertEqual(resposta.status_code, 405)
+
+    def test_token_ausente_e_rejeitado(self):
+        self.client.force_login(self.gerente)
+        self.client.post("/alterar-cargo/", {"cpf": self.CPF_ALVO, "novo_cargo": "SUPERVISOR"})
+        self.alvo.refresh_from_db()
+        self.assertFalse(self.alvo.is_staff)
+
+    def test_cargo_invalido_e_rejeitado(self):
+        self.client.force_login(self.gerente)
+        resposta = self.client.post("/alterar-cargo/", {
+            "cpf": self.CPF_ALVO, "novo_cargo": "DEUS", "form_token": _gerar_form_token()
+        })
+        self.assertIn(resposta.status_code, (301, 302))
+        self.alvo.refresh_from_db()
+        self.assertFalse(self.alvo.is_staff)
+
+    def test_nao_pode_alterar_proprio_cargo(self):
+        self.client.force_login(self.gerente)
+        resposta = self.client.post("/alterar-cargo/", {
+            "cpf": self.CPF_GERENTE, "novo_cargo": "COMUM", "form_token": _gerar_form_token()
+        })
+        self.assertIn(resposta.status_code, (301, 302))
+        self.gerente.refresh_from_db()
+        self.assertTrue(self.gerente.is_superuser)
+
+    def test_nao_pode_alterar_cargo_de_outro_gerente(self):
+        outro_gerente = User.objects.create_superuser(
+            username="00000000000", password=SENHA_FORTE, first_name="Outro Gerente"
+        )
+        self.client.force_login(self.gerente)
+        resposta = self.client.post("/alterar-cargo/", {
+            "cpf": "00000000000", "novo_cargo": "COMUM", "form_token": _gerar_form_token()
+        })
+        self.assertIn(resposta.status_code, (301, 302))
+        outro_gerente.refresh_from_db()
+        self.assertTrue(outro_gerente.is_superuser)
+
+    # --- Fluxo feliz ---
+
+    def test_gerente_promove_comum_para_supervisor(self):
+        self.client.force_login(self.gerente)
+        self.client.post("/alterar-cargo/", self._payload("SUPERVISOR"))
+        self.alvo.refresh_from_db()
+        self.assertTrue(self.alvo.is_staff)
+        self.assertFalse(self.alvo.is_superuser)
+
+    def test_gerente_rebaixa_supervisor_para_comum(self):
+        self.alvo.is_staff = True
+        self.alvo.save()
+        self.client.force_login(self.gerente)
+        self.client.post("/alterar-cargo/", self._payload("COMUM"))
+        self.alvo.refresh_from_db()
+        self.assertFalse(self.alvo.is_staff)
+
+    def test_resposta_htmx_tem_hx_redirect(self):
+        self.client.force_login(self.gerente)
+        resposta = self.client.post(
+            "/alterar-cargo/",
+            self._payload(),
+            HTTP_HX_REQUEST="true",
+        )
+        self.assertEqual(resposta.status_code, 204)
+        self.assertIn("HX-Redirect", resposta)
+
+
+# ==============================================================================
+# UTILS — formatar_data_br e preparar_data_para_input
+# ==============================================================================
+
+class UtilsDataTestCase(TestCase):
+    """Funções puras de conversão de data — sem Mongo, sem rede."""
+
+    def test_formatar_data_br_formato_correto(self):
+        self.assertEqual(formatar_data_br("2026-07-12"), "12/07/2026")
+
+    def test_formatar_data_br_vazio_retorna_travessao(self):
+        self.assertEqual(formatar_data_br(""), "—")
+
+    def test_formatar_data_br_travessao_passado_retorna_travessao(self):
+        self.assertEqual(formatar_data_br("—"), "—")
+
+    def test_formatar_data_br_formato_invalido_retorna_travessao(self):
+        # VP-5: antes retornava o input inválido; agora deve retornar '—'
+        self.assertEqual(formatar_data_br("2026-01-15T00:00:00"), "—")
+        self.assertEqual(formatar_data_br("15/01/2026"), "—")
+        self.assertEqual(formatar_data_br("nao-e-uma-data"), "—")
+
+    def test_preparar_data_para_input_formato_correto(self):
+        self.assertEqual(preparar_data_para_input("12/07/2026"), "2026-07-12")
+
+    def test_preparar_data_para_input_travessao_retorna_vazio(self):
+        self.assertEqual(preparar_data_para_input("—"), "")
+
+    def test_preparar_data_para_input_formato_invalido_retorna_vazio(self):
+        self.assertEqual(preparar_data_para_input("2026-07-12"), "")
+
+
+# ==============================================================================
+# SESSÃO EXPIRADA — HX-Redirect em requests HTMX (VP-3)
+# ==============================================================================
+
+class SessaoExpiradaHtmxTestCase(TestCase):
+    """Garante que SessaoExpiradaMiddleware emite HX-Redirect (não 302) em HTMX."""
+
+    def _criar_sessao_stale(self):
+        """Cria um cookie de sessão válido no banco, depois destroi os dados
+        da sessão no banco para simular expiração — cookie existe mas sessão está vazia."""
+        from django.contrib.sessions.backends.db import SessionStore
+        s = SessionStore()
+        s['_placeholder'] = True
+        s.save()
+        session_key = s.session_key
+        # Simula expiração: deleta os dados deixando o key inacessível
+        s.delete()
+        return session_key
+
+    def test_sessao_expirada_em_request_htmx_retorna_hx_redirect(self):
+        session_key = self._criar_sessao_stale()
+        from django.conf import settings as dj_settings
+        # Injeta o cookie stale no client sem usar force_login
+        self.client.cookies[dj_settings.SESSION_COOKIE_NAME] = session_key
+        resposta = self.client.get("/inicio/", HTTP_HX_REQUEST="true")
+        # Deve responder 204 com HX-Redirect, não 302
+        self.assertEqual(resposta.status_code, 204)
+        self.assertIn("HX-Redirect", resposta)
+        self.assertIn("/login/", resposta["HX-Redirect"])
+
+    def test_sessao_expirada_em_request_normal_retorna_302(self):
+        session_key = self._criar_sessao_stale()
+        from django.conf import settings as dj_settings
+        self.client.cookies[dj_settings.SESSION_COOKIE_NAME] = session_key
+        resposta = self.client.get("/inicio/")
+        # Sem HX-Request: redirect normal
+        self.assertIn(resposta.status_code, (301, 302))
+        self.assertNotIn("HX-Redirect", resposta)
+
+
+# ==============================================================================
+# SALVA EDIÇÃO FUNCIONÁRIO — falha MongoDB não gera 500 (VP-1)
+# ==============================================================================
+
+class SalvaEdicaoFuncionarioFalhaMongoTestCase(MongoTesteBase):
+    """Garante que erro no MongoDB em salva_edicao_funcionario devolve redirect
+    amigável ao usuário em vez de página de erro 500."""
+
+    CPF_SUPERVISOR = "52998224725"
+    CPF_ALVO = "44455566677"
+
+    def setUp(self):
+        super().setUp()
+        self.supervisor = User.objects.create_user(
+            username=self.CPF_SUPERVISOR, password=SENHA_FORTE,
+            is_staff=True, first_name="Supervisor Teste"
+        )
+        self.alvo = User.objects.create_user(
+            username=self.CPF_ALVO, password=SENHA_FORTE,
+            is_staff=False, first_name="Funcionario Alvo"
+        )
+        self.colecao_funcionarios.insert_one({
+            "CPF": self.CPF_ALVO,
+            "NOME": "FUNCIONARIO ALVO",
+            "FUNCAO": "COMUM",
+            "RG": "123456789",
+            "DATA_NASCIMENTO": "01/01/1990",
+        })
+
+    def _payload_edicao(self):
+        token = _gerar_form_token()
+        self.client.session['cpf_editando'] = self.CPF_ALVO
+        session = self.client.session
+        session['cpf_editando'] = self.CPF_ALVO
+        session.save()
+        return {
+            "form_token": token,
+            "NOME": "Funcionario Alvo Editado",
+            "DATA_NASCIMENTO": "1990-01-01",
+            "RG": "123456789",
+            "FUNCAO": "COMUM",
+            "SENHA": "",
+        }
+
+    @patch("obras.views.colecao_funcionarios")
+    def test_falha_mongodb_retorna_redirect_nao_500(self, mock_col):
+        """update_one lança exceção → deve redirecionar, não 500."""
+        mock_col.find_one.return_value = {
+            "CPF": self.CPF_ALVO,
+            "NOME": "FUNCIONARIO ALVO",
+            "FUNCAO": "COMUM",
+            "RG": "123456789",
+            "DATA_NASCIMENTO": "01/01/1990",
+        }
+        mock_col.update_one.side_effect = Exception("MongoDB timeout simulado")
+        self.client.force_login(self.supervisor)
+        resposta = self.client.post("/salvar-edicao-funcionario/", self._payload_edicao())
+        # Deve redirecionar (PRG), não explodir com 500
+        self.assertIn(resposta.status_code, (301, 302))
+        self.assertNotEqual(resposta.status_code, 500)
