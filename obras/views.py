@@ -249,8 +249,14 @@ def _ler_contador_login(chave):
     doc = colecao_seguranca_login.find_one({'_id': chave})
     if not doc:
         return 0, 0
-    # pymongo devolve datetimes sem tzinfo (naive UTC); comparar com naive UTC também.
-    restante = (doc['expira_em'] - datetime.now(timezone.utc).replace(tzinfo=None)).total_seconds()
+    # Comparamos aware×aware para ser independente da configuração tz_aware do MongoClient.
+    # pymongo devolve naive UTC por padrão; utcfromtimestamp garante naive para a subtração.
+    expira = doc['expira_em']
+    if expira.tzinfo is not None:
+        agora_ref = datetime.now(timezone.utc)
+    else:
+        agora_ref = datetime.now(timezone.utc).replace(tzinfo=None)
+    restante = (expira - agora_ref).total_seconds()
     if restante <= 0:
         return 0, 0
     return doc.get('contagem', 0), restante
@@ -285,10 +291,12 @@ def _tentativas_restantes(chave_ip, chave_cpf):
 
 
 def _incrementar_contador_login(chave, expira_em, agora):
-    """Incrementa atomicamente o contador de tentativas e retorna a nova contagem."""
+    """Incrementa atomicamente o contador de tentativas e retorna a nova contagem.
+    Usa $set (não $setOnInsert) para renovar expira_em a cada tentativa — janela deslizante real:
+    o bloqueio só expira 15 min após a ÚLTIMA tentativa, não após a primeira."""
     resultado = colecao_seguranca_login.find_one_and_update(
         {'_id': chave},
-        {'$inc': {'contagem': 1}, '$set': {'atualizado_em': agora}, '$setOnInsert': {'expira_em': expira_em}},
+        {'$inc': {'contagem': 1}, '$set': {'atualizado_em': agora, 'expira_em': expira_em}},
         upsert=True,
         return_document=True,
     )
@@ -1529,6 +1537,7 @@ def salva_edicao_obra(request):
 
         erro_foto = False
         resultado_update = None
+        public_ids_novos = []  # inicializado aqui para o guard pós-try (linha ~1643) ser seguro
         try:
             # 4. PREPARAÇÃO DO DICIONÁRIO DE ATUALIZAÇÃO (Campos de Texto)
             empresa_completa = f"{nome_empresa.upper()} - CNPJ - {cnpj_empresa}"
@@ -1558,7 +1567,6 @@ def salva_edicao_obra(request):
             # ==========================================
             urls_novas = []
             registros_historico = []
-            public_ids_novos = []
             if fotos_novas_arquivos:
                 try:
                     for foto in fotos_novas_arquivos:
@@ -1572,7 +1580,6 @@ def salva_edicao_obra(request):
                     # Só atualiza capa e timelapse depois que TODOS os uploads terminaram com sucesso.
                     dados_atualizados['URL_FOTO'] = urls_novas[0]
 
-                    registros_historico = []
                     data_registro_br = formatar_data_br(str(agora_edicao.date()))
                     for url in urls_novas:
                         registros_historico.append({
@@ -1931,15 +1938,21 @@ def alterar_cargo_funcionario(request):
         messages.error(request, "Erro ao alterar cargo. Tente novamente.")
         return redirect('zona_admin')
 
+    nome_func = usuario_alvo.first_name or cpf
+    cargo_label = 'Supervisor' if novo_cargo == 'SUPERVISOR' else 'Funcionário Comum'
+
     if resultado_cargo.matched_count == 0:
         logger.warning(
             "alterar_cargo: sem documento Mongo para CPF=%s — is_staff atualizado no Django, "
             "FUNCAO não encontrada no Mongo (usuário criado fora do fluxo normal?)", cpf
         )
-
-    nome_func = usuario_alvo.first_name or cpf
-    cargo_label = 'Supervisor' if novo_cargo == 'SUPERVISOR' else 'Funcionário Comum'
-    messages.success(request, f"Cargo de {nome_func} alterado para {cargo_label}.")
+        messages.warning(
+            request,
+            f"Permissão de {nome_func} atualizada, mas o perfil no banco de dados não foi encontrado. "
+            "O acesso foi alterado; cadastre o funcionário novamente para sincronizar o perfil."
+        )
+    else:
+        messages.success(request, f"Cargo de {nome_func} alterado para {cargo_label}.")
     logger.warning(
         "Cargo alterado: CPF=%s (%s) → %s | executado por %s (IP: %s)",
         cpf, nome_func, cargo_label, request.user.username, _ip_do_cliente(request)

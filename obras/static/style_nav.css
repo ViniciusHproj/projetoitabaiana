@@ -519,7 +519,7 @@ body {
 [data-theme="dark"] h4,
 [data-theme="dark"] p,
 [data-theme="dark"] label,
-[data-theme="dark"] span:not(.sidebar-username):not(.sidebar-role):not(.texto-botao),
+[data-theme="dark"] span:not(.sidebar-username):not(.sidebar-role):not(.texto-botao):not(.exclusao-situacao):not(.zadmin-cargo-badge):not(.nav-role-badge),
 [data-theme="dark"] small,
 [data-theme="dark"] strong {
     color: #ffffff !important;

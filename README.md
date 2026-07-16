@@ -138,7 +138,7 @@ git push origin main
 
 ## Segurança implementada
 
-- **Rate-limit de login atômico** persistido no MongoDB (sobrevive a reinícios/deploys do Render) — bloqueio temporário por IP e por CPF após tentativas seguidas erradas, com janela deslizante de 15 minutos. Incremento de contador usa `$inc` atômico via `find_one_and_update`, eliminando race condition de POSTs simultâneos. O IP é lido do **último** valor de `X-Forwarded-For` (escrito pelo proxy do Render), nunca do primeiro (que vem do cliente e pode ser forjado).
+- **Rate-limit de login com janela deslizante real** persistido no MongoDB (sobrevive a reinícios/deploys do Render) — bloqueio temporário por IP e por CPF após tentativas seguidas erradas. Incremento usa `$inc` + `$set` atômicos via `find_one_and_update`: o prazo de 15 minutos é renovado a cada nova tentativa (desde a última, não desde a primeira), impedindo ataques lentos que aguardam o TTL inicial e reiniciam. O IP é lido do **último** valor de `X-Forwarded-For` (escrito pelo proxy do Render), nunca do primeiro (que vem do cliente e pode ser forjado).
 - **Sessão única por usuário** — um novo login em outro dispositivo encerra a sessão anterior automaticamente, com feedback via `HX-Redirect` para preservar o layout HTMX.
 - **Redirect de usuário autenticado em `/login/`** — GET e POST para `/login/` redirecionam para `/inicio/` se o usuário já está autenticado, impedindo re-login na mesma janela.
 - **Content-Security-Policy** (CSP) com `nonce` por request — inclui `form-action 'self'` e `base-uri 'self'` além de `script-src` com nonce. Impede execução de scripts sem nonce, redirecionamento de formulários para domínios externos e injeção de `<base>`. Gerado por middleware em `obras/middleware.py`.
@@ -154,6 +154,7 @@ git push origin main
 - **Proteção contra open-redirect** em `?next=` no login, validado com `url_has_allowed_host_and_scheme()`.
 - **HTTPS forçado, cookies seguros e HSTS** em produção.
 - **Controle de acesso por papel** (`is_staff`) verificado em cada view sensível — cadastro/edição de funcionários é restrito a supervisores; cadastro/edição de obras é liberado para qualquer funcionário autenticado (por decisão de negócio).
+- **Índice único em CPF no MongoDB** (`colecao_funcionarios`) — garante unicidade de documentos de funcionário mesmo em race condition entre requests simultâneos; o Django User já protegia via `username` único, agora o Mongo tem sua própria camada.
 - **Rollback manual** de dados do Django em caso de falha no MongoDB em `salva_edicao_funcionario`, para evitar divergência entre os dois bancos.
 - **HTMX servido localmente** (`obras/static/htmx.min.js` v1.9.10) — sem carregamento de script de CDN externo.
 

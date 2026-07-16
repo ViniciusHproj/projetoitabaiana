@@ -17,11 +17,10 @@ function mascaraCPF(input) {
 
 function mascaraRG(input) {
   var v = input.value.replace(/\D/g, '');
-  if (v.length <= 9) {
-    v = v.replace(/(\d{2})(\d)/, '$1.$2');
-    v = v.replace(/(\d{3})(\d)/, '$1.$2');
-    v = v.replace(/(\d{3})(\d{1})$/, '$1-$2');
-  }
+  if (v.length > 9) v = v.slice(0, 9);
+  v = v.replace(/(\d{2})(\d)/, '$1.$2');
+  v = v.replace(/(\d{3})(\d)/, '$1.$2');
+  v = v.replace(/(\d{3})(\d{1})$/, '$1-$2');
   input.value = v;
 }
 
