@@ -84,10 +84,13 @@
 
             {% if obra.URL_FOTO %}
                 <div style="position: relative;">
-                    <img src="{{ obra.URL_FOTO }}" alt="Foto da Obra"
+                    <img src="{{ obra.URL_FOTO }}" alt="Foto da obra {{ obra.ID_OBRA }}"
+                         role="button" tabindex="0"
+                         aria-label="Ver galeria da obra {{ obra.ID_OBRA }}"
                          hx-get="{% url 'galeria_obra' obra.ID_OBRA %}"
                          hx-target="#container-modal-galeria"
                          hx-indicator="#spinner-galeria-{{ obra.ID_OBRA }}"
+                         hx-trigger="click, keyup[key=='Enter'||key==' ']"
                          class="foto-obra-card"
                          style="width: 100%; height: 200px; object-fit: cover; border-radius: 6px; margin-bottom: 4px; cursor: pointer; transition: opacity 0.2s;"
                          title="Clique para ver a galeria completa">
@@ -113,12 +116,12 @@
                 <p style="margin: 4px 0; font-size: 14px;"><strong>Valor:</strong> R$ {{ obra.VALOR_OBRA }}</p>
                 <p style="margin: 4px 0; font-size: 14px;"><strong>Situação:</strong>
                     <span style="background:
-                        {% if obra.SITUACAO == 'Em andamento' %}#28a745
+                        {% if obra.SITUACAO == 'Em andamento' %}#18854c
                         {% elif obra.SITUACAO == 'Finalizada por conclusão de construção' or obra.SITUACAO == 'Finalizada por distrato' %}#155d27
-                        {% elif obra.SITUACAO == 'Paralisada' %}#b8860b
-                        {% elif obra.SITUACAO == 'Cancelada' %}#dc3545
-                        {% elif obra.SITUACAO == 'Em licitação' %}#50c878
-                        {% else %}#6c757d{% endif %};
+                        {% elif obra.SITUACAO == 'Paralisada' %}#8a5a00
+                        {% elif obra.SITUACAO == 'Cancelada' %}#b02a37
+                        {% elif obra.SITUACAO == 'Em licitação' %}#2c7a7b
+                        {% else %}#5c636a{% endif %};
                         color: white; padding: 3px 8px; border-radius: 12px; font-size: 12px; font-weight: bold; display: inline-block;">
                         {{ obra.SITUACAO }}
                     </span>

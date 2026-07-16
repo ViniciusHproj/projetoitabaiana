@@ -1286,6 +1286,16 @@ def cadastro_obras(request):
                             pass
                 return _render_cadastro("Erro ao enviar as imagens para o servidor.", nivel='error')
 
+            def _limpar_uploads_orfaos():
+                # Remove do Cloudinary as fotos já enviadas quando o cadastro aborta
+                # antes de persistir a obra — evita imagens órfãs consumindo cota.
+                for pid in public_ids_enviados:
+                    if pid:
+                        try:
+                            cloudinary.uploader.destroy(pid)
+                        except Exception:
+                            pass
+
             url_da_foto_capa = urls_galeria[0] if urls_galeria else ""
 
             # 5. MONTAGEM DO DICIONÁRIO (Fiel ao Banco e Planilha)
@@ -1348,10 +1358,12 @@ def cadastro_obras(request):
                     break
                 except DuplicateKeyError:
                     if id_obra_manual:
+                        _limpar_uploads_orfaos()
                         return _render_cadastro(f"O ID {id_obra_manual} já está cadastrado no banco de dados.", nivel='error')
                     continue  # outro cadastro pegou esse número primeiro: recalcula e tenta de novo
 
             if resultado is None:
+                _limpar_uploads_orfaos()
                 messages.error(request, "Não foi possível gerar um ID de obra único. Tente novamente.")
                 return redirect('Cadastro-Obras')
 

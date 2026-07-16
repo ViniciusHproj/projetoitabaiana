@@ -90,7 +90,12 @@ function initLogin() {
     if (btn) { btn.classList.add('htmx-request'); btn.disabled = true; }
   });
   var cpfInput = document.getElementById('id_username');
-  if (cpfInput) cpfInput.addEventListener('input', function () { mascaraCPF(this); });
+  if (cpfInput) cpfInput.addEventListener('input', function () {
+    // Só formata como CPF enquanto o valor for numérico. Permite login por
+    // username alfabético (ex: contas createsuperuser) — o rótulo é "Usuário ou CPF"
+    // e a máscara não deve apagar letras digitadas.
+    if (!/[a-zA-Z]/.test(this.value)) mascaraCPF(this);
+  });
 }
 
 /* ── Busca de Funcionário ── */
@@ -679,6 +684,10 @@ function initZonaAdmin() {
         if (spanId)   spanId.textContent   = btn.dataset.id;
         if (spanTipo) spanTipo.textContent = btn.dataset.tipo !== '—' ? btn.dataset.tipo : '';
         modal.style.display = 'flex';
+        // Foco no Cancelar (default seguro em modal destrutivo) — traz o foco de
+        // teclado para dentro do diálogo em vez de deixá-lo na lista atrás.
+        var cancFoco = document.getElementById('modal-exclusao-cancelar');
+        if (cancFoco) cancFoco.focus();
       });
     });
     var btnCancObra = document.getElementById('modal-exclusao-cancelar');
@@ -706,6 +715,8 @@ function initZonaAdmin() {
         if (cargoSelect) cargoSelect.value = cur === 'SUPERVISOR' ? 'COMUM' : 'SUPERVISOR';
         if (cargoCpf)    cargoCpf.value = btn.dataset.cpf;
         modalCargo.style.display = 'flex';
+        var cancCargoFoco = document.getElementById('modal-cargo-cancelar');
+        if (cancCargoFoco) cancCargoFoco.focus();
       });
     });
     var btnCancCargo = document.getElementById('modal-cargo-cancelar');
@@ -728,6 +739,8 @@ function initZonaAdmin() {
         if (excNome) excNome.textContent = btn.dataset.nome;
         if (excCpf)  excCpf.value        = btn.dataset.cpf;
         modalExcFunc.style.display = 'flex';
+        var cancExcFuncFoco = document.getElementById('modal-excfunc-cancelar');
+        if (cancExcFuncFoco) cancExcFuncFoco.focus();
       });
     });
     var excCanc  = document.getElementById('modal-excfunc-cancelar');
