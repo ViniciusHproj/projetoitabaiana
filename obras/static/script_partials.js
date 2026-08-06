@@ -624,9 +624,13 @@ function initModalGaleria() {
     if (e.target === this) fecharModalGaleria();
   });
 
-  /* { once: true } garante no máximo um listener ativo por vez,
-     mesmo se HTMX reinjectar o fragmento sem fechar o modal anterior. */
-  document.addEventListener('keydown', _fecharComEscape, { once: true });
+  /* Registrado via _addDocListener (não addEventListener direto) para que
+     _removerListenersGlobais() o remova na próxima navegação HTMX caso o
+     usuário nunca feche o modal explicitamente — sem isso, abrir a galeria
+     repetidas vezes sem fechar acumulava um listener órfão em document a
+     cada abertura. fecharModalGaleria() ainda remove explicitamente no
+     fechamento normal (botão/backdrop/Escape). */
+  _addDocListener('keydown', _fecharComEscape);
 
   /* Delegação para as fotos — evita onclick inline em cada <img> */
   overlay.addEventListener('click', function (e) {
@@ -651,8 +655,9 @@ function initModalGaleria() {
     function _fecharLightbox() {
       document.removeEventListener('keydown', _escapeDoLightbox);
       lb.remove();
-      /* Restaura o listener do modal depois que o lightbox fecha. */
-      document.addEventListener('keydown', _fecharComEscape, { once: true });
+      /* Restaura o listener do modal depois que o lightbox fecha — via
+         _addDocListener pelo mesmo motivo do registro inicial (linha ~633). */
+      _addDocListener('keydown', _fecharComEscape);
     }
 
     function _escapeDoLightbox(e) {
@@ -660,7 +665,7 @@ function initModalGaleria() {
     }
 
     lb.addEventListener('click', _fecharLightbox);
-    document.addEventListener('keydown', _escapeDoLightbox);
+    _addDocListener('keydown', _escapeDoLightbox);
     document.body.appendChild(lb);
   }
 }

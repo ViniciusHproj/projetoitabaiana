@@ -676,7 +676,15 @@ def logout_view(request):
     motivo = request.POST.get('motivo', '')
     if request.user.is_authenticated:
         try:
-            colecao_sessoes_ativas.delete_one({'_id': request.user.pk})
+            # Filtra por session_key também — sem isso, uma sessão já superada por
+            # um login mais novo em outro dispositivo (que ainda não foi derrubada
+            # por não ter feito nenhuma requisição desde então) apagaria, ao
+            # deslogar, o registro que protege a sessão nova, desativando a
+            # garantia de sessão única silenciosamente.
+            colecao_sessoes_ativas.delete_one({
+                '_id': request.user.pk,
+                'session_key': request.session.session_key,
+            })
         except Exception:
             logger.exception("Erro ao remover sessão ativa no logout — user=%s", request.user.pk)
         auth_logout(request)
@@ -1590,7 +1598,11 @@ def salva_edicao_obra(request):
                         urls_novas.append(url_url)
 
                     # Só atualiza capa e timelapse depois que TODOS os uploads terminaram com sucesso.
-                    dados_atualizados['URL_FOTO'] = urls_novas[0]
+                    # A capa só é definida automaticamente se a obra ainda não tinha
+                    # nenhuma foto — senão, anexar novas fotos (ex: acompanhamento)
+                    # trocaria silenciosamente a capa já escolhida pelo usuário.
+                    if not galeria_atual:
+                        dados_atualizados['URL_FOTO'] = urls_novas[0]
 
                     data_registro_br = formatar_data_br(str(agora_edicao.date()))
                     for url in urls_novas:
@@ -2136,7 +2148,19 @@ def deletar_obra(request):
         messages.error(request, f"Obra {id_obra} não encontrada.")
         return redirect('zona_admin')
 
-    # 1. Deletar fotos do Cloudinary (melhor esforço — falha não impede exclusão)
+    # 1. Deletar a obra do MongoDB primeiro — é a única operação abaixo que pode
+    # falhar de forma visível (ex: blip de conectividade). Se falhar aqui, nada
+    # mais é tocado e a obra continua íntegra. Fazer isso por último deixaria a
+    # obra visível na vitrine pública sem fotos/histórico caso só esse passo falhasse.
+    try:
+        colecao_obras.delete_one({'ID_OBRA': id_obra})
+    except Exception:
+        logger.exception("Erro ao deletar obra %s do MongoDB", id_obra)
+        messages.error(request, "Erro ao excluir a obra. Tente novamente.")
+        return redirect('zona_admin')
+    _bump_cache_obras()
+
+    # 2. Deletar fotos do Cloudinary (melhor esforço — falha não impede exclusão)
     galeria = obra.get('GALERIA') or []
     for url in galeria:
         public_id = _extrair_public_id_cloudinary(url)
@@ -2146,23 +2170,14 @@ def deletar_obra(request):
             except Exception:
                 logger.warning("Não foi possível deletar imagem Cloudinary: %s", public_id)
 
-    # 2. Deletar entradas de timelapse
+    # 3. Deletar entradas de timelapse
     try:
         colecao_timelapse.delete_many({'ID_OBRA': id_obra})
     except Exception:
         logger.exception("Erro ao deletar timelapse da obra %s", id_obra)
 
-    # 3. Deletar da planilha em background
+    # 4. Deletar da planilha em background
     _disparar_em_background(deletar_do_google_sheets, id_obra)
-
-    # 4. Deletar a obra do MongoDB
-    try:
-        colecao_obras.delete_one({'ID_OBRA': id_obra})
-    except Exception:
-        logger.exception("Erro ao deletar obra %s do MongoDB", id_obra)
-        messages.error(request, "Erro ao excluir a obra. Tente novamente.")
-        return redirect('zona_admin')
-    _bump_cache_obras()
 
     logger.warning(
         "Obra %s excluída por %s (IP: %s)",

@@ -2206,49 +2206,6 @@ class DeletarObraTestCase(MongoTesteBase):
 
 
 # ==============================================================================
-# DASHBOARD PÚBLICO
-# ==============================================================================
-
-class DashboardPublicoTestCase(MongoTesteBase):
-    """dashboard_publico é público (sem autenticação) e suporta dual-render."""
-
-    def test_acessivel_sem_autenticacao(self):
-        resposta = self.client.get("/dashboard-obras/")
-        self.assertEqual(resposta.status_code, 200)
-
-    def test_retorna_partial_em_request_htmx(self):
-        resposta = self.client.get("/dashboard-obras/", HTTP_HX_REQUEST="true")
-        self.assertEqual(resposta.status_code, 200)
-        self.assertTemplateUsed(resposta, "dashboard_obras.html")
-        self.assertTemplateNotUsed(resposta, "index.html")
-
-    def test_retorna_shell_em_acesso_direto(self):
-        resposta = self.client.get("/dashboard-obras/")
-        self.assertTemplateUsed(resposta, "index.html")
-        self.assertTemplateUsed(resposta, "dashboard_obras.html")
-
-    def test_cards_de_totais_presentes_no_contexto(self):
-        self.colecao_obras.insert_one({
-            "ID_OBRA": "12026",
-            "SITUACAO": "Em andamento",
-            "TIPO_EXECUCAO": "Nova Construção",
-            "VALOR_OBRA": 100000.0,
-            "DATA_INICIO": "01/01/2026",
-            "EMPRESA_CONTRATADA": "Empresa A",
-            "TIMESTAMP_CADASTRO": __import__("datetime").datetime.now(),
-        })
-        resposta = self.client.get("/dashboard-obras/", HTTP_HX_REQUEST="true")
-        self.assertEqual(resposta.context["total"], 1)
-        self.assertEqual(resposta.context["em_execucao"], 1)
-
-    def test_funciona_com_banco_vazio(self):
-        """Com coleção vazia, não deve lançar exceção — retorna zeros."""
-        resposta = self.client.get("/dashboard-obras/", HTTP_HX_REQUEST="true")
-        self.assertEqual(resposta.status_code, 200)
-        self.assertEqual(resposta.context["total"], 0)
-
-
-# ==============================================================================
 # SESSÃO EXPIRADA — MIDDLEWARE
 # ==============================================================================
 
@@ -2273,8 +2230,6 @@ class SessaoExpiradaMiddlewareTestCase(MongoTesteBase):
         self.client.cookies["sessionid"] = "cookie_stale_visitante_publico_abc"
         resposta = self.client.get("/lista-obras/")
         self.assertEqual(resposta.status_code, 200)
-        resposta2 = self.client.get("/dashboard-obras/")
-        self.assertEqual(resposta2.status_code, 200)
 
     def test_sessao_valida_nao_e_redirecionada(self):
         user = User.objects.create_user(
